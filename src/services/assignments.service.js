@@ -12,7 +12,12 @@ export const assignmentsService = {
         classes (
           id,
           name,
-          subject
+          subject,
+          class_members (
+            id,
+            student_id,
+            users:student_id (id, name, email, avatar, student_id)
+          )
         ),
         assignment_students (
           id,
@@ -25,7 +30,8 @@ export const assignmentsService = {
           status,
           submitted_at,
           submission_link,
-          comment
+          comment,
+          users:student_id (id, name, email, avatar, student_id)
         )
       `)
       .eq('admin_id', adminId)
@@ -84,10 +90,9 @@ export const assignmentsService = {
 
   /**
    * Create an assignment
-   * Coordinated insert handling assign_to_all vs selected students
+   * Defensive non-transactional rollback on partial failure
    */
   async createAssignment(assignmentData, selectedStudentIds = []) {
-    // 1. Insert assignment
     const { data: newAssignment, error: aErr } = await supabase
       .from('assignments')
       .insert({
@@ -110,7 +115,7 @@ export const assignmentsService = {
       throw aErr
     }
 
-    // 2. If assign_to_all is false and selected students are provided, insert into assignment_students
+    // If assign_to_all is false and selected students are provided, insert into assignment_students
     if (!assignmentData.assign_to_all && selectedStudentIds.length > 0) {
       const studentRows = selectedStudentIds.map((sId) => ({
         assignment_id: newAssignment.id,
@@ -122,7 +127,7 @@ export const assignmentsService = {
         .insert(studentRows)
 
       if (sErr) {
-        console.error('[assignmentsService] Error assigning students, rolling back assignment:', sErr)
+        console.error('[assignmentsService] Error allocating students, rolling back assignment:', sErr)
         // Cleanup orphaned assignment
         await supabase.from('assignments').delete().eq('id', newAssignment.id)
         throw new Error('Failed to allocate assignment to selected students: ' + sErr.message)
@@ -133,13 +138,21 @@ export const assignmentsService = {
   },
 
   /**
-   * Update an assignment
+   * Update an assignment and update student allocations if specified
    */
-  async updateAssignment(assignmentId, updates) {
+  async updateAssignment(assignmentId, updates, selectedStudentIds = null) {
     const { data, error } = await supabase
       .from('assignments')
       .update({
-        ...updates,
+        title: updates.title.trim(),
+        description: updates.description?.trim() || '',
+        class_id: updates.class_id,
+        due_date: updates.due_date,
+        due_time: updates.due_time || '23:59:00',
+        drive_link: updates.drive_link?.trim() || null,
+        points: Number(updates.points) || 100,
+        assign_to_all: updates.assign_to_all ?? true,
+        status: updates.status || 'published',
         updated_at: new Date().toISOString(),
       })
       .eq('id', assignmentId)
@@ -150,18 +163,28 @@ export const assignmentsService = {
       console.error('[assignmentsService] Error updating assignment:', error)
       throw error
     }
+
+    // If selectedStudentIds array is passed, update assignment_students table
+    if (selectedStudentIds !== null) {
+      await supabase.from('assignment_students').delete().eq('assignment_id', assignmentId)
+      if (!updates.assign_to_all && selectedStudentIds.length > 0) {
+        const studentRows = selectedStudentIds.map((sId) => ({
+          assignment_id: assignmentId,
+          student_id: sId,
+        }))
+        await supabase.from('assignment_students').insert(studentRows)
+      }
+    }
+
     return data
   },
 
   /**
-   * Delete an assignment
+   * Delete an assignment and related records
    */
   async deleteAssignment(assignmentId) {
-    // Delete allocations first
     await supabase.from('assignment_students').delete().eq('assignment_id', assignmentId)
-    // Delete submissions
     await supabase.from('submissions').delete().eq('assignment_id', assignmentId)
-    // Delete assignment
     const { error } = await supabase.from('assignments').delete().eq('id', assignmentId)
     if (error) {
       console.error('[assignmentsService] Error deleting assignment:', error)

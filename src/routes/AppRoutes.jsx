@@ -4,6 +4,8 @@ import Login from '../pages/Login'
 import AdminDashboard from '../pages/admin/AdminDashboard'
 import ClassesManagement from '../pages/admin/ClassesManagement'
 import StudentsManagement from '../pages/admin/StudentsManagement'
+import AssignmentsList from '../pages/admin/AssignmentsList'
+import CreateAssignment from '../pages/admin/CreateAssignment'
 import StudentDashboard from '../pages/student/StudentDashboard'
 import DashboardLayout from '../components/layout/DashboardLayout'
 import ProtectedRoute from './ProtectedRoute'
@@ -37,9 +39,9 @@ export default function AppRoutes({ user, loading, onLogout }) {
       >
         <Route index element={<AdminDashboard />} />
         <Route path="classes" element={<ClassesManagement />} />
-        <Route path="assignments" element={<AdminDashboard />} />
-        <Route path="assignments/create" element={<AdminDashboard />} />
-        <Route path="assignments/:id" element={<AdminDashboard />} />
+        <Route path="assignments" element={<AssignmentsList />} />
+        <Route path="assignments/create" element={<CreateAssignment />} />
+        <Route path="assignments/:id/edit" element={<CreateAssignment />} />
         <Route path="submissions" element={<AdminDashboard />} />
         <Route path="grades" element={<AdminDashboard />} />
         <Route path="students" element={<StudentsManagement />} />

@@ -13,6 +13,10 @@ import StudentDashboard from '../pages/student/StudentDashboard'
 import AssignmentDetails from '../pages/student/AssignmentDetails'
 import StudentSubmissions from '../pages/student/StudentSubmissions'
 import StudentAnnouncements from '../pages/student/StudentAnnouncements'
+import ClassDetailPage from '../pages/shared/ClassDetailPage'
+import SettingsPage from '../pages/shared/SettingsPage'
+import ProfilePage from '../pages/shared/ProfilePage'
+import JoinClassPage from '../pages/shared/JoinClassPage'
 import DashboardLayout from '../components/layout/DashboardLayout'
 import ProtectedRoute from './ProtectedRoute'
 import RoleRoute from './RoleRoute'
@@ -32,6 +36,10 @@ export default function AppRoutes({ user, loading, onLogout }) {
         }
       />
 
+      {/* Public / Semi-Public Join & Invitation Route */}
+      <Route path="/join" element={<JoinClassPage />} />
+      <Route path="/invite" element={<JoinClassPage />} />
+
       {/* Admin Protected Routes */}
       <Route
         path="/admin"
@@ -45,6 +53,8 @@ export default function AppRoutes({ user, loading, onLogout }) {
       >
         <Route index element={<AdminDashboard />} />
         <Route path="classes" element={<ClassesManagement />} />
+        <Route path="classes/:id" element={<ClassDetailPage />} />
+        <Route path="classes/:id/people" element={<ClassDetailPage />} />
         <Route path="assignments" element={<AssignmentsList />} />
         <Route path="assignments/create" element={<CreateAssignment />} />
         <Route path="assignments/:id/edit" element={<CreateAssignment />} />
@@ -53,7 +63,8 @@ export default function AppRoutes({ user, loading, onLogout }) {
         <Route path="students" element={<StudentsManagement />} />
         <Route path="announcements" element={<AnnouncementsManagement />} />
         <Route path="reports" element={<GradesGradebook />} />
-        <Route path="settings" element={<ClassesManagement />} />
+        <Route path="profile" element={<ProfilePage />} />
+        <Route path="settings" element={<SettingsPage />} />
       </Route>
 
       {/* Student Protected Routes */}
@@ -68,14 +79,16 @@ export default function AppRoutes({ user, loading, onLogout }) {
         }
       >
         <Route index element={<StudentDashboard />} />
-        <Route path="classes" element={<StudentDashboard />} />
+        <Route path="classes" element={<ClassesManagement />} />
+        <Route path="classes/:id" element={<ClassDetailPage />} />
+        <Route path="classes/:id/people" element={<ClassDetailPage />} />
         <Route path="assignments" element={<StudentDashboard />} />
         <Route path="assignments/:id" element={<AssignmentDetails />} />
         <Route path="submissions" element={<StudentSubmissions />} />
         <Route path="progress" element={<StudentDashboard />} />
         <Route path="announcements" element={<StudentAnnouncements />} />
-        <Route path="profile" element={<StudentDashboard />} />
-        <Route path="settings" element={<StudentDashboard />} />
+        <Route path="profile" element={<ProfilePage />} />
+        <Route path="settings" element={<SettingsPage />} />
       </Route>
 
       {/* Default Catch-all */}

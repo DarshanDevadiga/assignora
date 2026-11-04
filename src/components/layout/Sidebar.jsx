@@ -31,6 +31,7 @@ export default function Sidebar({ role = 'admin', isOpen = false, onClose }) {
     { name: 'Students', path: '/admin/students', icon: Users },
     { name: 'Announcements', path: '/admin/announcements', icon: Bell },
     { name: 'Reports', path: '/admin/reports', icon: FileText },
+    { name: 'Profile', path: '/admin/profile', icon: User },
     { name: 'Settings', path: '/admin/settings', icon: Settings },
   ]
 

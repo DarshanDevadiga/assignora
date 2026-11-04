@@ -14,7 +14,8 @@ import {
   Send,
   AlertCircle,
   Sparkles,
-  BookOpen
+  BookOpen,
+  KeyRound
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
@@ -24,6 +25,7 @@ import Card from '../../components/common/Card'
 import StatCard from '../../components/common/StatCard'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
+import JoinClassModal from '../../components/class/JoinClassModal'
 
 export default function StudentDashboard() {
   const { user } = useAuth()
@@ -33,6 +35,7 @@ export default function StudentDashboard() {
   const [assignments, setAssignments] = useState([])
   const [submissions, setSubmissions] = useState([])
   const [loading, setLoading] = useState(true)
+  const [isJoinModalOpen, setIsJoinModalOpen] = useState(false)
 
   useEffect(() => {
     loadStudentData()
@@ -144,7 +147,7 @@ export default function StudentDashboard() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3 pt-4 text-xs font-semibold text-brand-primary">
+          <div className="flex flex-wrap items-center gap-3 pt-4 text-xs font-semibold text-brand-primary">
             <span className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-full border border-brand-border/80 shadow-xs">
               <BookOpen className="w-3.5 h-3.5" />
               {classes.length} Enrolled Courses
@@ -153,6 +156,15 @@ export default function StudentDashboard() {
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
               {submittedCount} Completed
             </span>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={KeyRound}
+              onClick={() => setIsJoinModalOpen(true)}
+              className="shadow-purple-glow font-bold ml-auto"
+            >
+              + Join Class
+            </Button>
           </div>
         </div>
 
@@ -188,6 +200,71 @@ export default function StudentDashboard() {
           label="Completion Rate"
           color="blue"
         />
+      </div>
+
+      {/* Enrolled Courses Section */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-brand-heading flex items-center gap-2">
+            <BookOpen className="w-5 h-5 text-brand-primary" />
+            <span>My Enrolled Courses ({classes.length})</span>
+          </h2>
+          <Button
+            variant="outline"
+            size="sm"
+            icon={KeyRound}
+            onClick={() => setIsJoinModalOpen(true)}
+            className="text-xs"
+          >
+            Join with Code
+          </Button>
+        </div>
+
+        {classes.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {classes.map((cls) => (
+              <div
+                key={cls.id}
+                onClick={() => navigate(`/student/classes/${cls.id}`)}
+                className="group p-5 rounded-2xl bg-white border border-brand-line hover:border-brand-primary/60 shadow-card hover:shadow-card-hover transition-all cursor-pointer flex flex-col justify-between space-y-3"
+              >
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-brand-primary bg-brand-light px-2.5 py-0.5 rounded-full inline-block">
+                    {cls.subject || 'Course'}
+                  </span>
+                  <h3 className="font-bold text-base text-brand-heading mt-2 group-hover:text-brand-primary transition-colors line-clamp-1">
+                    {cls.name}
+                  </h3>
+                  {cls.description && (
+                    <p className="text-xs text-brand-muted mt-1 line-clamp-2">
+                      {cls.description}
+                    </p>
+                  )}
+                </div>
+
+                <div className="pt-3 border-t border-brand-line/60 flex items-center justify-between text-xs">
+                  <span className="text-brand-primary font-semibold group-hover:underline flex items-center gap-1">
+                    <span>Open Class Page</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Card className="text-center py-8 space-y-2">
+            <p className="text-xs text-brand-muted">You are not enrolled in any classes yet.</p>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={KeyRound}
+              onClick={() => setIsJoinModalOpen(true)}
+              className="shadow-purple-glow font-semibold"
+            >
+              Join Your First Class
+            </Button>
+          </Card>
+        )}
       </div>
 
       {/* Main Grid: My Assignments (8 cols) + Progress & Deadlines (4 cols) */}
@@ -425,6 +502,13 @@ export default function StudentDashboard() {
         </div>
 
       </div>
+
+      {/* Modal: Join Class */}
+      <JoinClassModal
+        isOpen={isJoinModalOpen}
+        onClose={() => setIsJoinModalOpen(false)}
+        onEnrolled={() => loadStudentData()}
+      />
     </div>
   )
 }

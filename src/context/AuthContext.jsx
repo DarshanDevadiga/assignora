@@ -73,6 +73,18 @@ export function AuthProvider({ children }) {
     setProfile(null)
   }
 
+  const refreshProfile = async () => {
+    if (!authUser?.id) return null
+    try {
+      const updatedProfile = await authService.getUserProfile(authUser.id)
+      setProfile(updatedProfile)
+      return updatedProfile
+    } catch (err) {
+      console.error('[AuthContext] Error refreshing profile:', err)
+      return null
+    }
+  }
+
   // Combined user object for application consumption
   const user = useMemo(() => {
     if (!authUser) return null
@@ -97,6 +109,7 @@ export function AuthProvider({ children }) {
     error,
     signIn,
     signOut,
+    refreshProfile,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

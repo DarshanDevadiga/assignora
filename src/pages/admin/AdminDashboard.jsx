@@ -300,7 +300,7 @@ export default function AdminDashboard() {
                   </button>
                 </div>
 
-                <div className="flex items-center gap-4 text-xs font-semibold text-white/90 pt-4">
+                <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-white/90 pt-4">
                   <span className="flex items-center gap-1.5 bg-white/15 px-2.5 py-1 rounded-full">
                     <Users className="w-3.5 h-3.5" />
                     {currentClassStudentsCount} Students
@@ -309,6 +309,14 @@ export default function AdminDashboard() {
                     <Calendar className="w-3.5 h-3.5" />
                     Semester 2026
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/admin/classes/${selectedClass.id}`)}
+                    className="flex items-center gap-1.5 bg-white text-brand-primary px-3 py-1 rounded-full text-xs font-bold shadow-md hover:bg-slate-50 transition-all cursor-pointer ml-auto"
+                  >
+                    <span>Open Class Page</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
 

@@ -14,15 +14,20 @@ import {
   Folder,
   Layers,
   ArrowRight,
-  Sparkles
+  Sparkles,
+  UserPlus,
+  KeyRound
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { classesService } from '../../services/classes.service'
+import { supabase } from '../../lib/supabase'
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
 import Modal from '../../components/common/Modal'
 import { Input, Textarea } from '../../components/common/Input'
+import InviteStudentModal from '../../components/class/InviteStudentModal'
+import JoinClassModal from '../../components/class/JoinClassModal'
 
 const THEMES = [
   {
@@ -77,16 +82,41 @@ export default function ClassesManagement() {
   // Active dropdown menu per card
   const [activeMenuId, setActiveMenuId] = useState(null)
 
+  // Invite Modal State
+  const [inviteModalClass, setInviteModalClass] = useState(null)
+
+  // Student Join Class Modal
+  const [isJoinModalOpen, setIsJoinModalOpen] = useState(false)
+
+  const isTeacher = user?.role === 'admin'
+
   useEffect(() => {
     loadClasses()
-  }, [user?.id])
+  }, [user?.id, user?.role])
 
   async function loadClasses() {
     if (!user?.id) return
     try {
       setLoading(true)
-      const data = await classesService.getAdminClasses(user.id)
-      setClasses(data)
+      if (user.role === 'admin') {
+        const data = await classesService.getAdminClasses(user.id)
+        setClasses(data)
+      } else {
+        const { data: memberRows } = await supabase
+          .from('class_members')
+          .select(`
+            class_id,
+            classes (
+              *,
+              class_members (id, student_id),
+              assignments (id, title, status, due_date, due_time, points)
+            )
+          `)
+          .eq('student_id', user.id)
+
+        const studentClasses = memberRows?.map((m) => m.classes).filter(Boolean) || []
+        setClasses(studentClasses)
+      }
     } catch (err) {
       console.error('[ClassesManagement] Error loading classes:', err)
     } finally {
@@ -190,14 +220,25 @@ export default function ClassesManagement() {
           </p>
         </div>
 
-        <Button
-          variant="primary"
-          icon={Plus}
-          onClick={() => setIsCreateOpen(true)}
-          className="self-start sm:self-auto shadow-purple-glow font-semibold"
-        >
-          Create Class
-        </Button>
+        {isTeacher ? (
+          <Button
+            variant="primary"
+            icon={Plus}
+            onClick={() => setIsCreateOpen(true)}
+            className="self-start sm:self-auto shadow-purple-glow font-semibold"
+          >
+            Create Class
+          </Button>
+        ) : (
+          <Button
+            variant="primary"
+            icon={KeyRound}
+            onClick={() => setIsJoinModalOpen(true)}
+            className="self-start sm:self-auto shadow-purple-glow font-semibold"
+          >
+            Join Class
+          </Button>
+        )}
       </div>
 
       {/* Classes Grid */}
@@ -221,7 +262,7 @@ export default function ClassesManagement() {
             return (
               <div
                 key={cls.id}
-                onClick={() => navigate('/admin')}
+                onClick={() => navigate(`/${isTeacher ? 'admin' : 'student'}/classes/${cls.id}`)}
                 className="group relative bg-white rounded-2xl border border-brand-line/80 shadow-card hover:shadow-card-hover hover:border-brand-border transition-all duration-200 overflow-hidden cursor-pointer flex flex-col justify-between"
               >
                 {/* Colored Top Header Banner */}
@@ -256,40 +297,69 @@ export default function ClassesManagement() {
 
                       {activeMenuId === cls.id && (
                         <div
-                          className="absolute right-0 mt-1 w-44 bg-white rounded-xl shadow-modal border border-brand-line py-1 z-30 text-left"
+                          className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-modal border border-brand-line py-1 z-30 text-left"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <button
                             type="button"
-                            onClick={(e) => handleOpenEdit(cls, e)}
-                            className="w-full px-3.5 py-2 text-xs font-medium text-brand-body hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-                          >
-                            <Edit2 className="w-3.5 h-3.5 text-slate-400" />
-                            <span>Edit Class</span>
-                          </button>
-
-                          <button
-                            type="button"
                             onClick={(e) => {
                               e.stopPropagation()
-                              navigate('/admin/students')
+                              navigate(`/${isTeacher ? 'admin' : 'student'}/classes/${cls.id}`)
                             }}
                             className="w-full px-3.5 py-2 text-xs font-medium text-brand-body hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
                           >
-                            <Users className="w-3.5 h-3.5 text-slate-400" />
-                            <span>Manage Roster</span>
+                            <BookOpen className="w-3.5 h-3.5 text-brand-primary" />
+                            <span>Open Class</span>
                           </button>
 
-                          <div className="border-t border-brand-line my-1" />
+                          {isTeacher && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setInviteModalClass(cls)
+                                  setActiveMenuId(null)
+                                }}
+                                className="w-full px-3.5 py-2 text-xs font-medium text-brand-body hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                              >
+                                <UserPlus className="w-3.5 h-3.5 text-brand-primary" />
+                                <span>Invite Students</span>
+                              </button>
 
-                          <button
-                            type="button"
-                            onClick={(e) => handleOpenDelete(cls.id, e)}
-                            className="w-full px-3.5 py-2 text-xs font-medium text-brand-danger hover:bg-rose-50 flex items-center gap-2 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span>Delete Class</span>
-                          </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  navigate(`/admin/classes/${cls.id}?tab=people`)
+                                }}
+                                className="w-full px-3.5 py-2 text-xs font-medium text-brand-body hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                              >
+                                <Users className="w-3.5 h-3.5 text-slate-400" />
+                                <span>Class People</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={(e) => handleOpenEdit(cls, e)}
+                                className="w-full px-3.5 py-2 text-xs font-medium text-brand-body hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
+                              >
+                                <Edit2 className="w-3.5 h-3.5 text-slate-400" />
+                                <span>Edit Class</span>
+                              </button>
+
+                              <div className="border-t border-brand-line my-1" />
+
+                              <button
+                                type="button"
+                                onClick={(e) => handleOpenDelete(cls.id, e)}
+                                className="w-full px-3.5 py-2 text-xs font-medium text-brand-danger hover:bg-rose-50 flex items-center gap-2 cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Delete Class</span>
+                              </button>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>
@@ -443,6 +513,20 @@ export default function ClassesManagement() {
           Are you sure you want to permanently delete this class? Students will no longer have access to its materials and assignments.
         </p>
       </Modal>
+
+      {/* Modal: Invite Students */}
+      <InviteStudentModal
+        isOpen={Boolean(inviteModalClass)}
+        onClose={() => setInviteModalClass(null)}
+        currentClass={inviteModalClass}
+      />
+
+      {/* Modal: Student Join Class */}
+      <JoinClassModal
+        isOpen={isJoinModalOpen}
+        onClose={() => setIsJoinModalOpen(false)}
+        onEnrolled={() => loadClasses()}
+      />
     </div>
   )
 }

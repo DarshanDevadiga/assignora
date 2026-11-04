@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Menu,
   Bell,
@@ -22,6 +23,7 @@ export default function Header({
   onLogout,
   onSwitchAccount,
 }) {
+  const navigate = useNavigate()
   const [profileOpen, setProfileOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const menuRef = useRef(null)
@@ -143,6 +145,30 @@ export default function Header({
               </div>
 
               <div className="py-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProfileOpen(false)
+                    navigate(`/${role}/profile`)
+                  }}
+                  className="w-full text-left px-4 py-2 text-xs font-medium text-brand-body hover:bg-brand-secondaryBg flex items-center gap-2 cursor-pointer"
+                >
+                  <User className="w-4 h-4 text-slate-400" />
+                  <span>My Profile</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProfileOpen(false)
+                    navigate(`/${role}/settings`)
+                  }}
+                  className="w-full text-left px-4 py-2 text-xs font-medium text-brand-body hover:bg-brand-secondaryBg flex items-center gap-2 cursor-pointer"
+                >
+                  <Settings className="w-4 h-4 text-slate-400" />
+                  <span>Settings</span>
+                </button>
+
                 {onSwitchAccount && (
                   <button
                     type="button"
@@ -152,7 +178,7 @@ export default function Header({
                     }}
                     className="w-full text-left px-4 py-2 text-xs font-medium text-brand-body hover:bg-brand-secondaryBg flex items-center gap-2 cursor-pointer"
                   >
-                    <User className="w-4 h-4 text-slate-400" />
+                    <Grid className="w-4 h-4 text-slate-400" />
                     <span>Switch Role / Demo Account</span>
                   </button>
                 )}

@@ -41,7 +41,7 @@ export default function StudentAnnouncements() {
           .eq('is_published', true)
           .order('created_at', { ascending: false })
 
-        items = data || []
+        items = (data || []).filter((a) => !a.title?.startsWith('[Discussion]'))
       }
       setAnnouncements(items)
     } catch (err) {

@@ -118,74 +118,112 @@ export default function ClassDetailPage() {
   // Menu toggles
   const [activeMenuMemberId, setActiveMenuMemberId] = useState(null)
 
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const refreshClassDetails = () => setRefreshTrigger((prev) => prev + 1)
+
   useEffect(() => {
-    loadClassDetails()
-  }, [classId, user?.id])
+    let isCancelled = false
 
-  async function loadClassDetails() {
-    if (!classId) return
-    try {
-      setLoading(true)
-      setError(null)
-      // Reset local states to avoid showing stale data when switching classes
-      setCurrentClass(null)
-      setSubmissions([])
-      setAnnouncements([])
-      setActivities([])
-      setResources([])
-      setMessages([])
+    async function loadData() {
+      if (!classId) return
+      // Wait until user session is resolved to evaluate permissions
+      if (!user?.id) return
 
-      // 1. Fetch class details with members and assignments
-      const cls = await classesService.getClassById(classId)
-      if (!cls) {
-        setError('Class not found.')
-        return
-      }
+      try {
+        setLoading(true)
+        setError(null)
 
-      // 1b. Verify student enrollment authorization
-      if (!isTeacher && user?.id) {
-        const isEnrolled = cls.class_members?.some((m) => m.student_id === user.id)
-        if (!isEnrolled) {
-          setError('You are not currently enrolled in this class. Please join using an invitation link or valid class code.')
+        // 1. Fetch class details with members and assignments
+        const cls = await classesService.getClassById(classId)
+        if (isCancelled) return
+
+        if (!cls) {
+          setError('Class not found.')
+          setCurrentClass(null)
           return
         }
+
+        // 1b. Verify role-based access authorization
+        if (isTeacher) {
+          // Allow class owner or global administrator
+          if (cls.admin_id !== user.id && user.role !== 'admin') {
+            setError('You do not have administrative permission to view this class.')
+            setCurrentClass(null)
+            return
+          }
+        } else {
+          // Verify student is enrolled in this class
+          const isEnrolled = cls.class_members?.some((m) => m.student_id === user.id)
+          if (!isEnrolled) {
+            setError('You are not currently enrolled in this class. Please join using an invitation link or valid class code.')
+            setCurrentClass(null)
+            return
+          }
+        }
+
+        setCurrentClass(cls)
+
+        // 2. Fetch class sub-resources in parallel for maximum speed & resilience
+        const [subsRes, annRes, actsRes, resRes, msgsRes] = await Promise.allSettled([
+          submissionsService.getClassSubmissions(classId),
+          announcementsService.getClassAnnouncements(classId),
+          classesService.getClassActivity(classId),
+          classesService.getClassResources(classId),
+          messagesService.getClassMessages(classId),
+        ])
+
+        if (isCancelled) return
+
+        if (subsRes.status === 'fulfilled') {
+          setSubmissions(subsRes.value || [])
+        } else {
+          console.warn('[ClassDetailPage] Could not load submissions:', subsRes.reason)
+        }
+
+        if (annRes.status === 'fulfilled') {
+          setAnnouncements(annRes.value || [])
+        } else {
+          console.warn('[ClassDetailPage] Could not load announcements:', annRes.reason)
+        }
+
+        if (actsRes.status === 'fulfilled') {
+          setActivities(actsRes.value || [])
+        } else {
+          console.warn('[ClassDetailPage] Could not load activities:', actsRes.reason)
+        }
+
+        if (resRes.status === 'fulfilled') {
+          setResources(resRes.value || [])
+        } else {
+          console.warn('[ClassDetailPage] Could not load resources:', resRes.reason)
+        }
+
+        if (msgsRes.status === 'fulfilled') {
+          setMessages(msgsRes.value || [])
+        } else {
+          console.warn('[ClassDetailPage] Could not load messages:', msgsRes.reason)
+        }
+
+        const prevRead = messagesService.getLastReadTimestamp(classId, user.id)
+        setLastReadTimestamp(prevRead)
+      } catch (err) {
+        if (!isCancelled) {
+          console.error('[ClassDetailPage] Error loading class details:', err)
+          setError(err.message || 'Failed to load class information.')
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoading(false)
+        }
       }
-
-      setCurrentClass(cls)
-
-      // 2. Fetch class submissions
-      const subs = await submissionsService.getClassSubmissions(classId)
-      setSubmissions(subs)
-
-      // 3. Fetch announcements for this class
-      const ann = await announcementsService.getClassAnnouncements(classId)
-      setAnnouncements(ann)
-
-      // 4. Fetch activity history
-      const acts = await classesService.getClassActivity(classId)
-      setActivities(acts)
-
-      // 5. Fetch resources
-      const res = await classesService.getClassResources(classId)
-      setResources(res)
-
-      // 6. Fetch class discussion messages
-      const msgs = await messagesService.getClassMessages(classId)
-      setMessages(msgs)
-      const prevRead = messagesService.getLastReadTimestamp(classId, user?.id)
-      setLastReadTimestamp(prevRead)
-
-      // If already on messages tab, mark as read immediately
-      if (activeTab === 'messages' && markClassAsRead) {
-        markClassAsRead(classId)
-      }
-    } catch (err) {
-      console.error('[ClassDetailPage] Error loading class details:', err)
-      setError(err.message || 'Failed to load class information.')
-    } finally {
-      setLoading(false)
     }
-  }
+
+    loadData()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [classId, user?.id, isTeacher, refreshTrigger])
 
   // Clear unread badge whenever user opens or is on messages tab
   useEffect(() => {
@@ -1823,7 +1861,11 @@ export default function ClassDetailPage() {
           assignment={submittingAssignment}
           onSuccess={() => {
             setSubmittingAssignment(null)
-            loadClassDetails()
+            refreshClassDetails()
+          }}
+          onSuccessDone={() => {
+            setSubmittingAssignment(null)
+            refreshClassDetails()
           }}
         />
       )}

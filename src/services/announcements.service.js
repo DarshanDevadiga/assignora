@@ -1,8 +1,16 @@
-import { supabase } from '../lib/supabase'
+import { supabase } from '../lib/supabase.js'
 
 export const announcementsService = {
   /**
-   * Get announcements for a class or admin
+   * Get announcements for a specific class (newest first)
+   */
+  async getClassAnnouncements(classId) {
+    if (!classId) return []
+    return this.getAnnouncements(classId)
+  },
+
+  /**
+   * Get announcements for a class or all announcements
    */
   async getAnnouncements(classId) {
     let query = supabase
@@ -24,7 +32,9 @@ export const announcementsService = {
       console.error('[announcementsService] Error fetching announcements:', error)
       throw error
     }
-    return data || []
+
+    // Filter out internal discussion messages so stream displays only real announcements
+    return (data || []).filter((a) => !a.title?.startsWith('[Discussion]'))
   },
 
   /**

@@ -66,6 +66,9 @@ export const classesService = {
       .single()
 
     if (error) {
+      if (error.code === 'PGRST116') {
+        return null
+      }
       console.error('[classesService] Error fetching class details:', error)
       throw error
     }

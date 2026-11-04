@@ -1,5 +1,5 @@
 /**
- * Utility functions for calculations and date formatting in Assignora
+ * Utility functions for calculations, date formatting, and CSV export in Assignora
  */
 
 export function calculateCompletionRate(submittedCount, totalAssigned) {
@@ -66,4 +66,33 @@ export function formatTimeAgo(dateInput) {
   if (diffSeconds < 604800) return `${Math.floor(diffSeconds / 86400)}d ago`
 
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+/**
+ * Export tabular data to downloadable CSV
+ */
+export function exportToCSV(filename, rows, headers) {
+  if (!rows || !rows.length) return
+
+  const headerLine = headers.map((h) => `"${h.label}"`).join(',')
+  const rowLines = rows.map((row) =>
+    headers
+      .map((h) => {
+        const val = row[h.key] ?? ''
+        return `"${String(val).replace(/"/g, '""')}"`
+      })
+      .join(',')
+  )
+
+  const csvContent = [headerLine, ...rowLines].join('\n')
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+
+  const link = document.createElement('a')
+  link.setAttribute('href', url)
+  link.setAttribute('download', `${filename}.csv`)
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
 }

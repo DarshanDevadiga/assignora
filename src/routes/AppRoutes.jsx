@@ -6,6 +6,8 @@ import ClassesManagement from '../pages/admin/ClassesManagement'
 import StudentsManagement from '../pages/admin/StudentsManagement'
 import AssignmentsList from '../pages/admin/AssignmentsList'
 import CreateAssignment from '../pages/admin/CreateAssignment'
+import SubmissionTracking from '../pages/admin/SubmissionTracking'
+import GradesGradebook from '../pages/admin/GradesGradebook'
 import StudentDashboard from '../pages/student/StudentDashboard'
 import AssignmentDetails from '../pages/student/AssignmentDetails'
 import StudentSubmissions from '../pages/student/StudentSubmissions'
@@ -44,11 +46,11 @@ export default function AppRoutes({ user, loading, onLogout }) {
         <Route path="assignments" element={<AssignmentsList />} />
         <Route path="assignments/create" element={<CreateAssignment />} />
         <Route path="assignments/:id/edit" element={<CreateAssignment />} />
-        <Route path="submissions" element={<AdminDashboard />} />
-        <Route path="grades" element={<AdminDashboard />} />
+        <Route path="submissions" element={<SubmissionTracking />} />
+        <Route path="grades" element={<GradesGradebook />} />
         <Route path="students" element={<StudentsManagement />} />
         <Route path="announcements" element={<AdminDashboard />} />
-        <Route path="reports" element={<AdminDashboard />} />
+        <Route path="reports" element={<GradesGradebook />} />
         <Route path="settings" element={<ClassesManagement />} />
       </Route>
 

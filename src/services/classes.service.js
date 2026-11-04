@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase'
+import { supabase } from '../lib/supabase.js'
 
 export const classesService = {
   /**
@@ -42,6 +42,7 @@ export const classesService = {
       .from('classes')
       .select(`
         *,
+        users:admin_id (id, name, email, avatar),
         class_members (
           id,
           student_id,

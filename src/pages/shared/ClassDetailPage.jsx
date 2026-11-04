@@ -126,6 +126,13 @@ export default function ClassDetailPage() {
     try {
       setLoading(true)
       setError(null)
+      // Reset local states to avoid showing stale data when switching classes
+      setCurrentClass(null)
+      setSubmissions([])
+      setAnnouncements([])
+      setActivities([])
+      setResources([])
+      setMessages([])
 
       // 1. Fetch class details with members and assignments
       const cls = await classesService.getClassById(classId)
@@ -133,6 +140,16 @@ export default function ClassDetailPage() {
         setError('Class not found.')
         return
       }
+
+      // 1b. Verify student enrollment authorization
+      if (!isTeacher && user?.id) {
+        const isEnrolled = cls.class_members?.some((m) => m.student_id === user.id)
+        if (!isEnrolled) {
+          setError('You are not currently enrolled in this class. Please join using an invitation link or valid class code.')
+          return
+        }
+      }
+
       setCurrentClass(cls)
 
       // 2. Fetch class submissions
@@ -635,7 +652,7 @@ export default function ClassDetailPage() {
               <div className="flex items-center gap-3.5">
                 <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-brand-primary to-brand-hover text-white flex items-center justify-center font-bold text-base shadow-purple-glow">
                   {currentClass.users?.avatar ? (
-                    <img src={currentClass.users.avatar} alt={currentClass.users.name} className="w-full h-full object-cover rounded-2xl" />
+                    <img src={currentClass.users.avatar} alt={currentClass.users?.name || 'Instructor'} className="w-full h-full object-cover rounded-2xl" />
                   ) : (
                     <span>{currentClass.users?.name?.charAt(0) || 'P'}</span>
                   )}

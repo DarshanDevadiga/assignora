@@ -36,7 +36,6 @@ export default function Sidebar({
 
   const adminSecondaryNav = [
     { name: 'Students', path: '/admin/students', icon: Users },
-    { name: 'Announcements', path: '/admin/announcements', icon: Bell },
     { name: 'Reports', path: '/admin/reports', icon: FileText },
     { name: 'Profile', path: '/admin/profile', icon: User },
     { name: 'Settings', path: '/admin/settings', icon: Settings },
@@ -51,7 +50,6 @@ export default function Sidebar({
   ]
 
   const studentSecondaryNav = [
-    { name: 'Announcements', path: '/student/announcements', icon: Bell },
     { name: 'Profile', path: '/student/profile', icon: User },
     { name: 'Settings', path: '/student/settings', icon: Settings },
   ]
@@ -68,12 +66,7 @@ export default function Sidebar({
           : location.pathname.startsWith(item.path)
 
         const isClassesNav = item.name === 'My Classes'
-        const isAnnouncementsNav = item.name === 'Announcements'
-        const badgeCount = isClassesNav
-          ? unreadClassesCount
-          : isAnnouncementsNav
-          ? unreadNotificationsCount
-          : 0
+        const badgeCount = isClassesNav ? unreadClassesCount : 0
 
         return (
           <li key={item.name}>

@@ -5,6 +5,7 @@ export function Input({
   error,
   helperText,
   icon: Icon,
+  rightElement,
   className = '',
   required = false,
   id,
@@ -30,9 +31,14 @@ export function Input({
           required={required}
           className={`block w-full rounded-input border bg-white px-3 py-2 text-sm text-brand-heading placeholder:text-slate-400 transition-colors focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20 ${
             Icon ? 'pl-9' : ''
-          } ${error ? 'border-brand-danger focus:ring-brand-danger/20' : 'border-brand-line'} ${className}`}
+          } ${rightElement ? 'pr-10' : ''} ${error ? 'border-brand-danger focus:ring-brand-danger/20' : 'border-brand-line'} ${className}`}
           {...props}
         />
+        {rightElement && (
+          <div className="absolute inset-y-0 right-0 flex items-center pr-2.5">
+            {rightElement}
+          </div>
+        )}
       </div>
       {error && <p className="mt-1 text-xs text-brand-danger font-medium">{error}</p>}
       {helperText && !error && <p className="mt-1 text-xs text-brand-muted">{helperText}</p>}

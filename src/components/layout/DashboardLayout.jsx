@@ -4,6 +4,7 @@ import Sidebar from './Sidebar'
 import Header from './Header'
 import MobileNav from './MobileNav'
 import NotificationsDrawer from '../common/NotificationsDrawer'
+import ErrorBoundary from '../common/ErrorBoundary'
 import { useNotifications } from '../../context/NotificationContext'
 
 export default function DashboardLayout({ user, role = 'admin', onLogout }) {
@@ -46,7 +47,9 @@ export default function DashboardLayout({ user, role = 'admin', onLogout }) {
 
         {/* Page Content */}
         <main className="flex-1 px-4 sm:px-8 py-6 pb-20 lg:pb-8 max-w-7xl w-full mx-auto">
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </main>
 
         {/* Mobile Bottom Navigation */}

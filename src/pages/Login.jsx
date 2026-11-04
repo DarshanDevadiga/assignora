@@ -1,9 +1,7 @@
 import React, { useState } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, Link } from 'react-router-dom'
 import {
   GraduationCap,
-  Users,
-  Shield,
   ArrowRight,
   CheckCircle2,
   Calendar,
@@ -12,126 +10,41 @@ import {
   AlertCircle,
   Lock,
   Mail,
-  Sparkles
+  Eye,
+  EyeOff
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import Button from '../components/common/Button'
 import { Input } from '../components/common/Input'
-
-const DEMO_ACCOUNTS = {
-  admin: [
-    {
-      id: 'admin1',
-      name: 'Admin 1 (Administrator)',
-      email: 'admin@assignora.demo',
-      password: 'Admin@12345',
-      role: 'admin',
-    },
-    {
-      id: 'admin2',
-      name: 'Admin 2 (Professor Admin)',
-      email: 'professor@assignora.demo',
-      password: 'Professor@123',
-      role: 'admin',
-    },
-  ],
-  student: [
-    {
-      id: 'student1',
-      name: 'Student 1 — John Doe',
-      email: 'student1@assignora.demo',
-      password: 'Student@123',
-      role: 'student',
-    },
-    {
-      id: 'student2',
-      name: 'Student 2 — Jane Smith',
-      email: 'student2@assignora.demo',
-      password: 'Student@123',
-      role: 'student',
-    },
-    {
-      id: 'student3',
-      name: 'Student 3 — Alex Johnson',
-      email: 'student3@assignora.demo',
-      password: 'Student@123',
-      role: 'student',
-    },
-    {
-      id: 'student4',
-      name: 'Student 4 — Sneha Rao',
-      email: 'student4@assignora.demo',
-      password: 'Student@123',
-      role: 'student',
-    },
-    {
-      id: 'student5',
-      name: 'Student 5 — Rahul Sharma',
-      email: 'student5@assignora.demo',
-      password: 'Student@123',
-      role: 'student',
-    },
-  ],
-}
 
 export default function Login() {
   const { signIn } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
-  const [selectedRole, setSelectedRole] = useState('student')
-  const [selectedAccountId, setSelectedAccountId] = useState('student1')
-  const [email, setEmail] = useState('student1@assignora.demo')
-  const [password, setPassword] = useState('Student@123')
-  const [isCustomMode, setIsCustomMode] = useState(false)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
-
-  // Handle role switcher tab click
-  const handleRoleChange = (role) => {
-    setSelectedRole(role)
-    setErrorMessage('')
-    const defaultAcc = DEMO_ACCOUNTS[role][0]
-    setSelectedAccountId(defaultAcc.id)
-    setEmail(defaultAcc.email)
-    setPassword(defaultAcc.password)
-    setIsCustomMode(false)
-  }
-
-  // Handle account dropdown selection
-  const handleAccountSelect = (e) => {
-    const accId = e.target.value
-    setSelectedAccountId(accId)
-    setErrorMessage('')
-
-    if (accId === 'custom') {
-      setIsCustomMode(true)
-      setEmail('')
-      setPassword('')
-    } else {
-      setIsCustomMode(false)
-      const found = DEMO_ACCOUNTS[selectedRole].find((a) => a.id === accId)
-      if (found) {
-        setEmail(found.email)
-        setPassword(found.password)
-      }
-    }
-  }
+  const [infoMessage, setInfoMessage] = useState('')
 
   // Submit login form
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!email || !password) {
-      setErrorMessage('Please provide both email and password.')
+    if (!email.trim() || !password) {
+      setErrorMessage('Please enter both your email address and password.')
       return
     }
 
     try {
       setLoading(true)
       setErrorMessage('')
-      const { profile } = await signIn(email, password)
+      setInfoMessage('')
       
-      const targetRole = profile?.role || selectedRole
+      const { profile } = await signIn(email.trim(), password)
+      
+      const targetRole = profile?.role || 'student'
       const from = location.state?.from?.pathname
       if (from && ((targetRole === 'admin' && from.startsWith('/admin')) || (targetRole === 'student' && from.startsWith('/student')))) {
         navigate(from, { replace: true })
@@ -140,14 +53,22 @@ export default function Login() {
       }
     } catch (err) {
       console.error('[Login] Error signing in:', err)
-      setErrorMessage(
-        err.message === 'Invalid login credentials'
-          ? 'Invalid email or password. Please verify your credentials or select a demo account.'
-          : err.message || 'Failed to sign in. Please try again.'
-      )
+      const msg = err.message || ''
+      if (msg.includes('Invalid login credentials')) {
+        setErrorMessage('Invalid email or password. Please verify your credentials and try again.')
+      } else if (msg.includes('Email not confirmed')) {
+        setErrorMessage('Email address is not confirmed. Please check your inbox.')
+      } else {
+        setErrorMessage(msg || 'Failed to sign in. Please check your internet connection.')
+      }
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleForgotPassword = (e) => {
+    e.preventDefault()
+    setInfoMessage('To reset your password, please contact your university administrator or instructor.')
   }
 
   return (
@@ -203,7 +124,7 @@ export default function Login() {
                 </span>
               </div>
 
-              {/* Mock items */}
+              {/* Preview items */}
               <div className="mt-4 space-y-2.5">
                 <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50/80 border border-brand-line/50">
                   <div className="flex items-center gap-3">
@@ -213,12 +134,12 @@ export default function Login() {
                         Web Development – Mini Project
                       </p>
                       <p className="text-[11px] text-brand-muted">
-                        Due Nov 5, 2026 • MCA Sem 5
+                        MCA Sem 5 • Practical Assignment
                       </p>
                     </div>
                   </div>
                   <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200/50">
-                    Submitted
+                    Active
                   </span>
                 </div>
 
@@ -227,26 +148,26 @@ export default function Login() {
                     <Calendar className="w-5 h-5 text-amber-500" />
                     <div>
                       <p className="text-xs font-semibold text-brand-heading">
-                        Data Structures – Problem Set
+                        Database Systems – ER Modeling
                       </p>
                       <p className="text-[11px] text-brand-muted">
-                        Due Nov 8, 2026 • 100 Points
+                        Due this week • 100 Points
                       </p>
                     </div>
                   </div>
                   <span className="text-[11px] font-medium text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200/50">
-                    Due in 5 days
+                    Submission Open
                   </span>
                 </div>
               </div>
 
-              {/* Little 3D accent badges */}
+              {/* Badges */}
               <div className="mt-4 flex items-center justify-between text-xs text-brand-muted pt-2 border-t border-brand-line/50">
                 <span className="flex items-center gap-1.5 font-medium">
-                  <BookOpen className="w-4 h-4 text-brand-primary" /> 2 Active Classes
+                  <BookOpen className="w-4 h-4 text-brand-primary" /> Multi-Class Management
                 </span>
                 <span className="flex items-center gap-1.5 font-medium">
-                  <Laptop className="w-4 h-4 text-brand-secondary" /> Two-Step Confirmation
+                  <Laptop className="w-4 h-4 text-brand-secondary" /> Instant Notifications
                 </span>
               </div>
             </div>
@@ -265,99 +186,81 @@ export default function Login() {
                 Welcome back!
               </h2>
               <p className="text-sm text-brand-muted">
-                Login to your Assignora account
+                Sign in to your Assignora account
               </p>
             </div>
 
             {/* Error Message */}
             {errorMessage && (
-              <div className="mb-5 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2.5">
+              <div className="mb-5 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2.5 animate-fadeIn">
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                <span>{errorMessage}</span>
+                <span className="leading-relaxed">{errorMessage}</span>
               </div>
             )}
 
-            {/* Role Switcher Tabs */}
-            <div className="space-y-1.5 mb-5">
-              <label className="block text-xs font-semibold text-brand-heading">
-                Select your role
-              </label>
-              <div className="grid grid-cols-2 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => handleRoleChange('student')}
-                  className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl border text-sm font-semibold transition-all cursor-pointer ${
-                    selectedRole === 'student'
-                      ? 'border-brand-primary bg-brand-activeNav text-brand-primary shadow-xs ring-2 ring-brand-primary/20'
-                      : 'border-brand-line bg-white text-brand-body hover:bg-slate-50'
-                  }`}
-                >
-                  <GraduationCap className="w-4 h-4" />
-                  <span>Student</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleRoleChange('admin')}
-                  className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl border text-sm font-semibold transition-all cursor-pointer ${
-                    selectedRole === 'admin'
-                      ? 'border-brand-primary bg-brand-activeNav text-brand-primary shadow-xs ring-2 ring-brand-primary/20'
-                      : 'border-brand-line bg-white text-brand-body hover:bg-slate-50'
-                  }`}
-                >
-                  <Users className="w-4 h-4" />
-                  <span>Professor / Admin</span>
-                </button>
+            {/* Info Message */}
+            {infoMessage && (
+              <div className="mb-5 p-3.5 rounded-xl bg-brand-light border border-brand-border text-brand-primary text-xs flex items-start gap-2.5 animate-fadeIn">
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                <span className="leading-relaxed">{infoMessage}</span>
               </div>
-            </div>
+            )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Account Dropdown */}
+              {/* Email input */}
+              <Input
+                label="Email address"
+                type="email"
+                required
+                autoComplete="email"
+                icon={Mail}
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value)
+                  if (errorMessage) setErrorMessage('')
+                }}
+                placeholder="name@university.edu"
+              />
+
+              {/* Password input */}
               <div>
-                <label className="block text-xs font-semibold text-brand-heading mb-1.5">
-                  Select your account
-                </label>
-                <select
-                  value={selectedAccountId}
-                  onChange={handleAccountSelect}
-                  className="w-full rounded-input border border-brand-line bg-white px-3.5 py-2.5 text-sm text-brand-heading font-medium focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20 cursor-pointer"
-                >
-                  {DEMO_ACCOUNTS[selectedRole].map((acc) => (
-                    <option key={acc.id} value={acc.id}>
-                      {acc.name} ({acc.email})
-                    </option>
-                  ))}
-                  <option value="custom">✏️ Enter custom credentials...</option>
-                </select>
-              </div>
-
-              {/* Email & Password inputs */}
-              <div className="space-y-3 pt-1">
-                <Input
-                  label="Email address"
-                  type="email"
-                  required
-                  icon={Mail}
-                  value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value)
-                    setIsCustomMode(true)
-                  }}
-                  placeholder="name@assignora.demo"
-                />
-
                 <Input
                   label="Password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
+                  autoComplete="current-password"
                   icon={Lock}
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value)
-                    setIsCustomMode(true)
+                    if (errorMessage) setErrorMessage('')
                   }}
-                  placeholder="••••••••"
+                  placeholder="Enter your password"
+                  rightElement={
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="text-slate-400 hover:text-brand-heading transition-colors p-1"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Eye className="w-4 h-4" />
+                      )}
+                    </button>
+                  }
                 />
+
+                <div className="flex items-center justify-end mt-1.5">
+                  <button
+                    type="button"
+                    onClick={handleForgotPassword}
+                    className="text-xs font-semibold text-brand-primary hover:text-brand-primary/80 transition-colors cursor-pointer"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
               </div>
 
               {/* Submit Button */}
@@ -366,49 +269,21 @@ export default function Login() {
                 variant="primary"
                 size="lg"
                 loading={loading}
-                className="w-full justify-center shadow-purple-glow text-base font-semibold py-3 mt-2"
+                className="w-full justify-center shadow-purple-glow text-base font-semibold py-3 mt-4"
               >
-                <span>Continue</span>
+                <span>Sign in</span>
                 <ArrowRight className="w-4 h-4" />
               </Button>
             </form>
 
-            {/* Quick Demo Accounts Selection Footer */}
-            <div className="mt-6 pt-5 border-t border-brand-line/60">
-              <span className="block text-center text-xs font-medium text-brand-muted mb-3">
-                Demo Accounts
-              </span>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <button
-                  type="button"
-                  onClick={() => handleRoleChange('student')}
-                  className="p-2.5 rounded-xl border border-brand-line/80 bg-slate-50 hover:bg-brand-activeNav hover:border-brand-border text-left transition-all cursor-pointer"
-                >
-                  <div className="flex items-center gap-1.5 font-semibold text-brand-heading">
-                    <GraduationCap className="w-3.5 h-3.5 text-brand-primary" />
-                    <span>Student Accounts</span>
-                  </div>
-                  <span className="block text-[11px] text-brand-muted mt-0.5 truncate">
-                    Student 1 – Student 5
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleRoleChange('admin')}
-                  className="p-2.5 rounded-xl border border-brand-line/80 bg-slate-50 hover:bg-brand-activeNav hover:border-brand-border text-left transition-all cursor-pointer"
-                >
-                  <div className="flex items-center gap-1.5 font-semibold text-brand-heading">
-                    <Shield className="w-3.5 h-3.5 text-brand-primary" />
-                    <span>Admin Accounts</span>
-                  </div>
-                  <span className="block text-[11px] text-brand-muted mt-0.5 truncate">
-                    Admin 1, Admin 2
-                  </span>
-                </button>
-              </div>
+            <div className="mt-6 pt-5 border-t border-brand-line/60 text-center">
+              <p className="text-xs text-brand-muted">
+                Need an account or class access?{' '}
+                <span className="font-medium text-brand-heading">
+                  Contact your instructor or school administrator
+                </span>
+              </p>
             </div>
-
           </div>
         </div>
 

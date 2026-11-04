@@ -18,7 +18,8 @@ import {
   Laptop,
   FolderOpen,
   AlertCircle,
-  Clock
+  Clock,
+  ArrowRight
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { classesService } from '../../services/classes.service'

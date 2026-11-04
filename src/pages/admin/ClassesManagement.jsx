@@ -409,14 +409,24 @@ export default function ClassesManagement() {
             <BookOpen className="w-8 h-8" />
           </div>
           <div>
-            <h3 className="text-lg font-bold text-brand-heading">No classes found</h3>
+            <h3 className="text-lg font-bold text-brand-heading">
+              {isTeacher ? 'No classes created yet' : 'No classes enrolled yet'}
+            </h3>
             <p className="text-sm text-brand-muted max-w-sm mx-auto mt-1">
-              Click the button below to create your first class and start assigning work.
+              {isTeacher
+                ? 'Click the button below to create your first class and start assigning coursework.'
+                : 'Join a class using the enrolment code or invitation link provided by your teacher.'}
             </p>
           </div>
-          <Button variant="primary" icon={Plus} onClick={() => setIsCreateOpen(true)}>
-            Create Class
-          </Button>
+          {isTeacher ? (
+            <Button variant="primary" icon={Plus} onClick={() => setIsCreateOpen(true)} className="shadow-purple-glow font-semibold">
+              Create Class
+            </Button>
+          ) : (
+            <Button variant="primary" icon={KeyRound} onClick={() => setIsJoinModalOpen(true)} className="shadow-purple-glow font-semibold">
+              Join Class
+            </Button>
+          )}
         </Card>
       )}
 

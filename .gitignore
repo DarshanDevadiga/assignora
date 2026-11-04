@@ -19,6 +19,12 @@ build/
 *.env
 !.env.example
 
+# Reference files - never upload to GitHub
+/reference/
+/references/
+reference/
+references/
+
 # Local Supabase temporary files
 .supabase/
 supabase/.temp/

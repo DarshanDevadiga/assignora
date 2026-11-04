@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-brand-bg text-brand-body font-sans;
+  }
+}
+
+/* Custom sleek scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* Glass & purple gradient accents matching reference banners */
+.purple-gradient-banner {
+  background: linear-gradient(135deg, #5B21F6 0%, #7C3AED 50%, #9333EA 100%);
+}
+
+.purple-gradient-card {
+  background: linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%);
+}

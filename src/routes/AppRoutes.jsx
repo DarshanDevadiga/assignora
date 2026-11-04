@@ -22,6 +22,7 @@ const ClassDetailPage = lazy(() => import('../pages/shared/ClassDetailPage'))
 const SettingsPage = lazy(() => import('../pages/shared/SettingsPage'))
 const ProfilePage = lazy(() => import('../pages/shared/ProfilePage'))
 const JoinClassPage = lazy(() => import('../pages/shared/JoinClassPage'))
+const LandingPage = lazy(() => import('../pages/LandingPage'))
 const NotFound = lazy(() => import('../pages/shared/NotFound'))
 
 // Lightweight skeleton fallback while chunk loads
@@ -43,6 +44,9 @@ export default function AppRoutes({ user, loading, onLogout }) {
   return (
     <Suspense fallback={<PageSkeleton />}>
       <Routes>
+        {/* Public Landing Page */}
+        <Route path="/" element={<LandingPage />} />
+
         {/* Public Login Route */}
         <Route
           path="/login"
@@ -52,6 +56,17 @@ export default function AppRoutes({ user, loading, onLogout }) {
             ) : (
               <Login />
             )
+          }
+        />
+
+        {/* Unified /dashboard redirect route based on active user role */}
+        <Route
+          path="/dashboard"
+          element={
+            <Navigate
+              to={user ? (user.role === 'admin' ? '/admin' : '/student') : '/login'}
+              replace
+            />
           }
         />
 

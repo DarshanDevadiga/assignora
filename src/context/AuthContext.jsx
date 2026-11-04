@@ -1,0 +1,111 @@
+import React, { createContext, useContext, useEffect, useState, useMemo } from 'react'
+import { authService } from '../services/auth.service'
+
+const AuthContext = createContext(null)
+
+export function AuthProvider({ children }) {
+  const [authUser, setAuthUser] = useState(null)
+  const [profile, setProfile] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  // Initialize auth state and restore session
+  useEffect(() => {
+    let isMounted = true
+
+    async function initAuth() {
+      try {
+        setLoading(true)
+        const session = await authService.getSession()
+        if (session?.user && isMounted) {
+          setAuthUser(session.user)
+          const userProfile = await authService.getUserProfile(session.user.id)
+          if (isMounted) {
+            setProfile(userProfile)
+          }
+        }
+      } catch (err) {
+        console.error('[AuthContext] Session restoration error:', err)
+        if (isMounted) setError(err.message)
+      } finally {
+        if (isMounted) setLoading(false)
+      }
+    }
+
+    initAuth()
+
+    // Listen for auth state changes
+    const { data: authListener } = authService.onAuthStateChange(async (event, session) => {
+      if (!isMounted) return
+
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (session?.user) {
+          setAuthUser(session.user)
+          const userProfile = await authService.getUserProfile(session.user.id)
+          if (isMounted) setProfile(userProfile)
+        }
+      } else if (event === 'SIGNED_OUT') {
+        setAuthUser(null)
+        setProfile(null)
+      }
+    })
+
+    return () => {
+      isMounted = false
+      if (authListener?.subscription) {
+        authListener.subscription.unsubscribe()
+      }
+    }
+  }, [])
+
+  const signIn = async (email, password) => {
+    setError(null)
+    const result = await authService.signIn(email, password)
+    setAuthUser(result.user)
+    setProfile(result.profile)
+    return result
+  }
+
+  const signOut = async () => {
+    setError(null)
+    await authService.signOut()
+    setAuthUser(null)
+    setProfile(null)
+  }
+
+  // Combined user object for application consumption
+  const user = useMemo(() => {
+    if (!authUser) return null
+    return {
+      id: authUser.id,
+      email: authUser.email,
+      name: profile?.name || authUser.user_metadata?.name || authUser.email.split('@')[0],
+      role: profile?.role || 'student', // default student if profile not yet loaded
+      avatar: profile?.avatar || null,
+      student_id: profile?.student_id || null,
+      rawAuth: authUser,
+      profile,
+    }
+  }, [authUser, profile])
+
+  const value = {
+    user,
+    authUser,
+    profile,
+    role: user?.role || null,
+    loading,
+    error,
+    signIn,
+    signOut,
+  }
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext)
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider')
+  }
+  return context
+}

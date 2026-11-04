@@ -158,22 +158,29 @@ export default function AdminDashboard() {
   const totalClassesCount = classes.length
   const totalAssignmentsCount = assignments.length
 
-  // Calculate total submissions and eligible student assignments
+  // Calculate total submissions and eligible student assignments accurately
   let totalSubmissionsCount = 0
   let totalAllocatedSlots = 0
 
   assignments.forEach((a) => {
-    const subs = a.submissions?.length || 0
-    totalSubmissionsCount += subs
+    const classMembers = a.classes?.class_members || classes.find((c) => c.id === a.class_id)?.class_members || []
+    const eligibleStudentIds = a.assign_to_all
+      ? classMembers.map((m) => m.student_id).filter(Boolean)
+      : (a.assignment_students || []).map((s) => s.student_id).filter(Boolean)
 
-    if (a.assign_to_all) {
-      // Find class student count
-      const cls = classes.find((c) => c.id === a.class_id)
-      const classMembersCount = cls?.class_members?.length || 0
-      totalAllocatedSlots += classMembersCount
-    } else {
-      totalAllocatedSlots += a.assignment_students?.length || 0
-    }
+    const validSubmittedStudentIds = new Set()
+    ;(a.submissions || []).forEach((sub) => {
+      if (
+        sub?.student_id &&
+        eligibleStudentIds.includes(sub.student_id) &&
+        ['submitted', 'reviewed'].includes(sub.status)
+      ) {
+        validSubmittedStudentIds.add(sub.student_id)
+      }
+    })
+
+    totalSubmissionsCount += validSubmittedStudentIds.size
+    totalAllocatedSlots += eligibleStudentIds.length
   })
 
   const avgCompletionRate = calculateCompletionRate(totalSubmissionsCount, totalAllocatedSlots)
@@ -185,12 +192,24 @@ export default function AdminDashboard() {
   let classSubmissionsCount = 0
   let classAllocatedSlots = 0
   currentClassAssignments.forEach((a) => {
-    classSubmissionsCount += a.submissions?.length || 0
-    if (a.assign_to_all) {
-      classAllocatedSlots += currentClassStudentsCount
-    } else {
-      classAllocatedSlots += a.assignment_students?.length || 0
-    }
+    const classMembers = a.classes?.class_members || selectedClass?.class_members || []
+    const eligibleStudentIds = a.assign_to_all
+      ? classMembers.map((m) => m.student_id).filter(Boolean)
+      : (a.assignment_students || []).map((s) => s.student_id).filter(Boolean)
+
+    const validSubmittedStudentIds = new Set()
+    ;(a.submissions || []).forEach((sub) => {
+      if (
+        sub?.student_id &&
+        eligibleStudentIds.includes(sub.student_id) &&
+        ['submitted', 'reviewed'].includes(sub.status)
+      ) {
+        validSubmittedStudentIds.add(sub.student_id)
+      }
+    })
+
+    classSubmissionsCount += validSubmittedStudentIds.size
+    classAllocatedSlots += eligibleStudentIds.length
   })
   const currentClassCompletion = calculateCompletionRate(classSubmissionsCount, classAllocatedSlots)
 

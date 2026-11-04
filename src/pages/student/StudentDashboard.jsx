@@ -15,7 +15,8 @@ import {
   AlertCircle,
   Sparkles,
   BookOpen,
-  KeyRound
+  KeyRound,
+  Plus
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
@@ -62,7 +63,7 @@ export default function StudentDashboard() {
       setClasses(studentClasses)
       const classIds = studentClasses.map((c) => c.id)
 
-      // 2. Fetch assignments assigned to all in student's classes
+      // 2. Fetch assignments assigned to all in student's enrolled classes
       let allAssigned = []
       if (classIds.length > 0) {
         const { data: classAssignments } = await supabase
@@ -78,7 +79,7 @@ export default function StudentDashboard() {
         allAssigned = classAssignments || []
       }
 
-      // Also fetch assignments where student is selectively assigned
+      // Also fetch assignments where student is selectively assigned (in enrolled classes only)
       const { data: specificAssignments } = await supabase
         .from('assignment_students')
         .select(`
@@ -90,20 +91,20 @@ export default function StudentDashboard() {
         `)
         .eq('student_id', user.id)
 
-      const selectiveList = specificAssignments?.map((s) => s.assignments).filter(Boolean) || []
-      
+      const selectiveList = (specificAssignments || [])
+        .map((s) => s.assignments)
+        .filter((a) => a && classIds.includes(a.class_id) && a.status === 'published')
+
       // Combine and deduplicate
-      const combined = [...allAssigned]
-      selectiveList.forEach((a) => {
-        if (!combined.some((item) => item.id === a.id)) {
-          combined.push(a)
-        }
-      })
+      const eligibleMap = new Map()
+      allAssigned.forEach((a) => eligibleMap.set(a.id, a))
+      selectiveList.forEach((a) => eligibleMap.set(a.id, a))
+      const combined = Array.from(eligibleMap.values())
       setAssignments(combined)
 
       // 3. Fetch student's submissions
       const studentSubs = await submissionsService.getStudentSubmissions(user.id)
-      setSubmissions(studentSubs)
+      setSubmissions(studentSubs || [])
     } catch (err) {
       console.error('[StudentDashboard] Error loading student dashboard:', err)
     } finally {
@@ -115,14 +116,21 @@ export default function StudentDashboard() {
   const submissionMap = useMemo(() => {
     const map = {}
     submissions.forEach((sub) => {
-      map[sub.assignment_id] = sub
+      if (
+        sub &&
+        (sub.status === 'submitted' || sub.status === 'reviewed' || sub.submitted_at || sub.submission_link)
+      ) {
+        map[sub.assignment_id] = sub
+      }
     })
     return map
   }, [submissions])
 
-  // Statistics
+  // Precise statistics derived strictly from eligible assignments
   const totalCount = assignments.length
-  const submittedCount = submissions.length
+  const submittedCount = useMemo(() => {
+    return assignments.filter((a) => Boolean(submissionMap[a.id])).length
+  }, [assignments, submissionMap])
   const pendingCount = Math.max(0, totalCount - submittedCount)
   const completionRate = calculateCompletionRate(submittedCount, totalCount)
 
@@ -139,41 +147,46 @@ export default function StudentDashboard() {
   return (
     <div className="space-y-6">
       {/* Top Welcome Banner matching reference mockup */}
-      <div className="relative overflow-hidden rounded-2xl purple-gradient-card p-6 border border-brand-border/70 shadow-card">
-        <div className="relative z-10 flex flex-col justify-between max-w-xl">
-          <div className="space-y-2">
+      <div className="relative overflow-hidden rounded-2xl purple-gradient-card p-6 sm:p-7 border border-brand-border/70 shadow-card">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-start md:justify-between gap-5">
+          {/* Left info column */}
+          <div className="space-y-3 max-w-xl">
             <h1 className="text-2xl sm:text-3xl font-extrabold text-brand-heading tracking-tight flex items-center gap-2">
               Welcome back, {studentDisplayName}! <span className="inline-block animate-pulse">👋</span>
             </h1>
             <p className="text-sm text-brand-muted leading-relaxed">
               Stay on top of your assignments, submit project deliverables, and track your completion progress in real-time.
             </p>
+
+            <div className="flex flex-wrap items-center gap-2.5 pt-1 text-xs font-semibold text-brand-primary">
+              <span className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-full border border-brand-border/80 shadow-xs">
+                <BookOpen className="w-3.5 h-3.5" />
+                {classes.length} Enrolled Courses
+              </span>
+              <span className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-full border border-brand-border/80 shadow-xs">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                {submittedCount} Completed
+              </span>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 pt-4 text-xs font-semibold text-brand-primary">
-            <span className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-full border border-brand-border/80 shadow-xs">
-              <BookOpen className="w-3.5 h-3.5" />
-              {classes.length} Enrolled Courses
-            </span>
-            <span className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-full border border-brand-border/80 shadow-xs">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              {submittedCount} Completed
-            </span>
+          {/* Top-Right Action: Clean Join Class Button */}
+          <div className="flex items-center sm:self-start shrink-0 pt-1">
             <Button
               variant="primary"
               size="sm"
-              icon={KeyRound}
+              icon={Plus}
               onClick={() => setIsJoinModalOpen(true)}
-              className="shadow-purple-glow font-bold ml-auto"
+              className="shadow-purple-glow font-bold text-xs sm:text-sm px-4 py-2 w-full sm:w-auto"
             >
-              + Join Class
+              Join Class
             </Button>
           </div>
         </div>
 
-        {/* 3D Illustration Graphic on right */}
-        <div className="absolute -right-4 -bottom-6 opacity-25 lg:opacity-40 pointer-events-none">
-          <GraduationCap className="w-48 h-48 text-brand-primary" />
+        {/* 3D Illustration Graphic on right, positioned safely */}
+        <div className="absolute right-2 -bottom-6 opacity-15 sm:opacity-20 lg:opacity-25 pointer-events-none select-none">
+          <GraduationCap className="w-40 h-40 text-brand-primary" />
         </div>
       </div>
 
@@ -304,7 +317,7 @@ export default function StudentDashboard() {
                 <Card
                   key={assignment.id}
                   padding="p-4 sm:p-5"
-                  className="hover:border-brand-border transition-all shadow-card flex items-center justify-between gap-4"
+                  className="hover:border-brand-border transition-all shadow-card flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                 >
                   <div className="flex items-start gap-3.5 min-w-0">
                     <div
@@ -334,7 +347,7 @@ export default function StudentDashboard() {
                       <p className="text-xs text-brand-muted mt-1">
                         {isSubmitted ? (
                           <span className="text-emerald-700 font-medium">
-                            Submitted: {formatDisplayDate(sub.submitted_at)}
+                            Submitted: {formatDisplayDate(sub.submitted_at || sub.created_at)}
                           </span>
                         ) : (
                           <span>
@@ -346,7 +359,7 @@ export default function StudentDashboard() {
                   </div>
 
                   {/* Actions & Badges */}
-                  <div className="flex items-center gap-3 shrink-0">
+                  <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
                     {isSubmitted ? (
                       <Badge variant="success" size="sm" dot>
                         Submitted
@@ -355,7 +368,11 @@ export default function StudentDashboard() {
                       <Badge variant={deadlineBadge.variant} size="sm">
                         {deadlineBadge.text}
                       </Badge>
-                    ) : null}
+                    ) : (
+                      <Badge variant="neutral" size="sm">
+                        Pending
+                      </Badge>
+                    )}
 
                     {isSubmitted ? (
                       <Button

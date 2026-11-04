@@ -27,7 +27,11 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(false)
 
+  const [redirectTimer, setRedirectTimer] = useState(null)
+
   const handleReset = () => {
+    if (redirectTimer) clearTimeout(redirectTimer)
+    setRedirectTimer(null)
     setCode('')
     setClassPreview(null)
     setError(null)
@@ -37,6 +41,7 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
   }
 
   const handleClose = () => {
+    if (redirectTimer) clearTimeout(redirectTimer)
     handleReset()
     onClose()
   }
@@ -90,10 +95,11 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
         onEnrolled(classPreview)
       }
 
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         handleClose()
         navigate(`/student/classes/${classPreview.id}`)
-      }, 1500)
+      }, 2500)
+      setRedirectTimer(timer)
     } catch (err) {
       console.error('[JoinClassModal] Enrollment error:', err)
       setError(err.message || 'Failed to complete enrolment.')
@@ -248,16 +254,39 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
 
         {/* Success State */}
         {success && (
-          <div className="py-8 text-center space-y-3">
+          <div className="py-6 text-center space-y-4">
             <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 mx-auto flex items-center justify-center">
               <CheckCircle2 className="w-8 h-8" />
             </div>
-            <h3 className="text-base font-bold text-brand-heading">
-              Successfully Enrolled!
-            </h3>
-            <p className="text-xs text-brand-muted">
-              You are now enrolled in <strong>{classPreview?.name}</strong>. Redirecting to your class...
-            </p>
+            <div>
+              <h3 className="text-base font-bold text-brand-heading">
+                Successfully Enrolled!
+              </h3>
+              <p className="text-xs text-brand-muted mt-1">
+                You are now enrolled in <strong>{classPreview?.name}</strong>. Your dashboard and course list have been updated.
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleClose}
+              >
+                Back to Dashboard
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                icon={ArrowRight}
+                onClick={() => {
+                  handleClose()
+                  navigate(`/student/classes/${classPreview.id}`)
+                }}
+                className="shadow-purple-glow font-semibold"
+              >
+                Go to Class
+              </Button>
+            </div>
           </div>
         )}
       </div>

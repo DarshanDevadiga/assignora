@@ -209,19 +209,36 @@ export default function AssignmentsList() {
       ) : filteredAssignments.length > 0 ? (
         <div className="space-y-4">
           {filteredAssignments.map((assignment) => {
-            const classMembersCount = assignment.classes?.class_members?.length || 0
-            const eligibleStudentsCount = assignment.assign_to_all
-              ? classMembersCount
-              : assignment.assignment_students?.length || 0
-            const submissionsCount = assignment.submissions?.length || 0
-            const completionRate = calculateCompletionRate(submissionsCount, eligibleStudentsCount)
+            const classMembers = assignment.classes?.class_members || []
+            const eligibleStudentIds = assignment.assign_to_all
+              ? classMembers.map((m) => m.student_id).filter(Boolean)
+              : (assignment.assignment_students || []).map((s) => s.student_id).filter(Boolean)
+
+            // Calculate unique eligible submitted students
+            const validSubmittedStudentIds = new Set()
+            ;(assignment.submissions || []).forEach((sub) => {
+              if (
+                sub?.student_id &&
+                eligibleStudentIds.includes(sub.student_id) &&
+                ['submitted', 'reviewed'].includes(sub.status)
+              ) {
+                validSubmittedStudentIds.add(sub.student_id)
+              }
+            })
+
+            const eligibleStudentsCount = eligibleStudentIds.length
+            const submittedCount = validSubmittedStudentIds.size
+            const pendingCount = Math.max(0, eligibleStudentsCount - submittedCount)
+            const completionRate = eligibleStudentsCount > 0
+              ? Math.round((submittedCount / eligibleStudentsCount) * 100)
+              : 0
             const deadlineBadge = formatDeadlineBadge(assignment.due_date, assignment.due_time)
 
             return (
               <Card
                 key={assignment.id}
                 padding="p-5 sm:p-6"
-                className="hover:border-brand-border transition-all shadow-card flex flex-col md:flex-row md:items-center justify-between gap-6"
+                className="hover:border-brand-border transition-all shadow-card flex flex-col xl:flex-row xl:items-center justify-between gap-6"
               >
                 {/* Left Info Column */}
                 <div className="space-y-3 min-w-0 flex-1">
@@ -279,52 +296,74 @@ export default function AssignmentsList() {
                   </div>
                 </div>
 
-                {/* Right Progress & Actions Column */}
-                <div className="flex flex-col sm:flex-row sm:items-center md:flex-col lg:flex-row items-stretch gap-4 shrink-0 md:w-72 lg:w-80 border-t md:border-t-0 pt-4 md:pt-0 border-brand-line">
-                  {/* Completion Rate */}
-                  <div className="flex-1 space-y-1.5">
-                    <div className="flex items-center justify-between text-xs font-semibold">
-                      <span className="text-brand-muted">Submissions</span>
-                      <span className="text-brand-primary">{submissionsCount} / {eligibleStudentsCount} ({completionRate}%)</span>
+                {/* Right: Submission Info & Actions Card */}
+                <div className="flex flex-col sm:flex-row xl:flex-row items-stretch sm:items-center gap-4 shrink-0 xl:min-w-[340px] p-4 rounded-xl bg-slate-50/80 border border-brand-line/70">
+                  {/* Submission Statistics & Scaled Progress Bar */}
+                  <div className="flex-1 space-y-2">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-[11px] font-bold text-brand-heading uppercase tracking-wider">
+                        Submissions
+                      </span>
+                      <span className="text-xs sm:text-sm font-extrabold text-brand-heading">
+                        {submittedCount} <span className="font-normal text-brand-muted text-xs">/ {eligibleStudentsCount} students</span>
+                      </span>
                     </div>
+
                     <ProgressBar
-                      value={submissionsCount}
+                      value={submittedCount}
                       max={eligibleStudentsCount || 1}
                       size="sm"
                       color={completionRate === 100 ? 'green' : 'purple'}
                     />
+
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-bold text-brand-primary">
+                        {completionRate}% submitted
+                      </span>
+                      <span className="text-brand-muted font-medium">
+                        {pendingCount} pending
+                      </span>
+                    </div>
                   </div>
 
-                  {/* Buttons */}
-                  <div className="flex items-center gap-2 justify-end">
+                  {/* Vertical divider on desktop */}
+                  <div className="hidden sm:block w-px h-10 bg-brand-line/80 self-center" />
+
+                  {/* Aligned Buttons & Actions */}
+                  <div className="flex items-center gap-2 justify-end shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-brand-line/60">
                     <Button
                       variant="primary"
                       size="sm"
                       onClick={() => navigate(`/admin/assignments/${assignment.id}`)}
+                      className="shadow-purple-glow font-semibold text-xs whitespace-nowrap"
                     >
                       Track Submissions
                     </Button>
 
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/admin/assignments/${assignment.id}/edit`)}
-                      className="p-2 rounded-lg text-slate-400 hover:text-brand-heading hover:bg-slate-100 transition-colors cursor-pointer"
-                      title="Edit Assignment"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/admin/assignments/${assignment.id}/edit`)}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-brand-heading hover:bg-white hover:shadow-xs transition-colors cursor-pointer"
+                        title="Edit Assignment"
+                        aria-label="Edit Assignment"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDeletingAssignment(assignment)
-                        setIsDeleteModalOpen(true)
-                      }}
-                      className="p-2 rounded-lg text-slate-400 hover:text-brand-danger hover:bg-rose-50 transition-colors cursor-pointer"
-                      title="Delete Assignment"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeletingAssignment(assignment)
+                          setIsDeleteModalOpen(true)
+                        }}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-brand-danger hover:bg-white hover:shadow-xs transition-colors cursor-pointer"
+                        title="Delete Assignment"
+                        aria-label="Delete Assignment"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </Card>

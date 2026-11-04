@@ -2,6 +2,8 @@ import React from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Login from '../pages/Login'
 import AdminDashboard from '../pages/admin/AdminDashboard'
+import ClassesManagement from '../pages/admin/ClassesManagement'
+import StudentsManagement from '../pages/admin/StudentsManagement'
 import StudentDashboard from '../pages/student/StudentDashboard'
 import DashboardLayout from '../components/layout/DashboardLayout'
 import ProtectedRoute from './ProtectedRoute'
@@ -34,16 +36,16 @@ export default function AppRoutes({ user, loading, onLogout }) {
         }
       >
         <Route index element={<AdminDashboard />} />
-        <Route path="classes" element={<AdminDashboard />} />
+        <Route path="classes" element={<ClassesManagement />} />
         <Route path="assignments" element={<AdminDashboard />} />
         <Route path="assignments/create" element={<AdminDashboard />} />
         <Route path="assignments/:id" element={<AdminDashboard />} />
         <Route path="submissions" element={<AdminDashboard />} />
         <Route path="grades" element={<AdminDashboard />} />
-        <Route path="students" element={<AdminDashboard />} />
+        <Route path="students" element={<StudentsManagement />} />
         <Route path="announcements" element={<AdminDashboard />} />
         <Route path="reports" element={<AdminDashboard />} />
-        <Route path="settings" element={<AdminDashboard />} />
+        <Route path="settings" element={<ClassesManagement />} />
       </Route>
 
       {/* Student Protected Routes */}

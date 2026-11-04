@@ -12,6 +12,7 @@ export const classesService = {
         class_members (
           id,
           student_id,
+          joined_at,
           users:student_id (id, name, email, avatar, student_id)
         ),
         assignments (
@@ -93,6 +94,53 @@ export const classesService = {
   },
 
   /**
+   * Update an existing class
+   */
+  async updateClass(classId, updates) {
+    const { data, error } = await supabase
+      .from('classes')
+      .update({
+        name: updates.name.trim(),
+        subject: updates.subject?.trim() || '',
+        description: updates.description?.trim() || '',
+      })
+      .eq('id', classId)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('[classesService] Error updating class:', error)
+      throw error
+    }
+    return data
+  },
+
+  /**
+   * Delete a class and related members
+   */
+  async deleteClass(classId) {
+    // 1. Delete class members
+    await supabase.from('class_members').delete().eq('class_id', classId)
+    // 2. Delete class announcements
+    await supabase.from('announcements').delete().eq('class_id', classId)
+    // 3. Delete assignments associated with this class
+    const { data: assignments } = await supabase.from('assignments').select('id').eq('class_id', classId)
+    if (assignments?.length) {
+      const assignmentIds = assignments.map((a) => a.id)
+      await supabase.from('assignment_students').delete().in('assignment_id', assignmentIds)
+      await supabase.from('submissions').delete().in('assignment_id', assignmentIds)
+      await supabase.from('assignments').delete().eq('class_id', classId)
+    }
+    // 4. Delete the class itself
+    const { error } = await supabase.from('classes').delete().eq('id', classId)
+    if (error) {
+      console.error('[classesService] Error deleting class:', error)
+      throw error
+    }
+    return true
+  },
+
+  /**
    * Add a member to a class
    */
   async addMember(classId, studentId) {
@@ -102,7 +150,13 @@ export const classesService = {
         class_id: classId,
         student_id: studentId,
       })
-      .select()
+      .select(`
+        id,
+        class_id,
+        student_id,
+        joined_at,
+        users:student_id (id, name, email, avatar, student_id)
+      `)
       .single()
 
     if (error) {

@@ -8,9 +8,11 @@ import AssignmentsList from '../pages/admin/AssignmentsList'
 import CreateAssignment from '../pages/admin/CreateAssignment'
 import SubmissionTracking from '../pages/admin/SubmissionTracking'
 import GradesGradebook from '../pages/admin/GradesGradebook'
+import AnnouncementsManagement from '../pages/admin/AnnouncementsManagement'
 import StudentDashboard from '../pages/student/StudentDashboard'
 import AssignmentDetails from '../pages/student/AssignmentDetails'
 import StudentSubmissions from '../pages/student/StudentSubmissions'
+import StudentAnnouncements from '../pages/student/StudentAnnouncements'
 import DashboardLayout from '../components/layout/DashboardLayout'
 import ProtectedRoute from './ProtectedRoute'
 import RoleRoute from './RoleRoute'
@@ -49,7 +51,7 @@ export default function AppRoutes({ user, loading, onLogout }) {
         <Route path="submissions" element={<SubmissionTracking />} />
         <Route path="grades" element={<GradesGradebook />} />
         <Route path="students" element={<StudentsManagement />} />
-        <Route path="announcements" element={<AdminDashboard />} />
+        <Route path="announcements" element={<AnnouncementsManagement />} />
         <Route path="reports" element={<GradesGradebook />} />
         <Route path="settings" element={<ClassesManagement />} />
       </Route>
@@ -71,7 +73,7 @@ export default function AppRoutes({ user, loading, onLogout }) {
         <Route path="assignments/:id" element={<AssignmentDetails />} />
         <Route path="submissions" element={<StudentSubmissions />} />
         <Route path="progress" element={<StudentDashboard />} />
-        <Route path="announcements" element={<StudentDashboard />} />
+        <Route path="announcements" element={<StudentAnnouncements />} />
         <Route path="profile" element={<StudentDashboard />} />
         <Route path="settings" element={<StudentDashboard />} />
       </Route>

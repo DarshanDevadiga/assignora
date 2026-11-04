@@ -1,14 +1,19 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from './AuthContext'
 import { notificationsService } from '../services/notifications.service'
 import { messagesService } from '../services/messages.service'
 import { classesService } from '../services/classes.service'
-import { supabase } from '../lib/supabase'
+import { supabase } from '../lib/supabase.js'
 
 const NotificationContext = createContext(null)
 
 export function NotificationProvider({ children }) {
   const { user } = useAuth()
+  const userIdRef = useRef(user?.id)
+
+  useEffect(() => {
+    userIdRef.current = user?.id
+  }, [user?.id])
 
   const [notifications, setNotifications] = useState([])
   const [classUnreadCounts, setClassUnreadCounts] = useState({})
@@ -16,32 +21,34 @@ export function NotificationProvider({ children }) {
 
   // 1. Fetch user notifications from database
   const loadNotifications = useCallback(async () => {
-    if (!user?.id) return
+    const currentUserId = userIdRef.current
+    if (!currentUserId) return
     try {
-      const data = await notificationsService.getUserNotifications(user.id)
+      const data = await notificationsService.getUserNotifications(currentUserId)
       setNotifications(data || [])
     } catch (err) {
       console.warn('[NotificationContext] Error loading notifications:', err)
     }
-  }, [user?.id])
+  }, [])
 
   // 2. Fetch and calculate unread messages per class
   const loadClassUnreadCounts = useCallback(async () => {
-    if (!user?.id) return
+    const currentUserId = userIdRef.current
+    if (!currentUserId) return
     try {
       let enrolledClassIds = []
 
-      if (user.role === 'admin') {
+      if (user?.role === 'admin') {
         const { data: adminClasses } = await supabase
           .from('classes')
           .select('id')
-          .eq('admin_id', user.id)
+          .eq('admin_id', currentUserId)
         enrolledClassIds = (adminClasses || []).map((c) => c.id)
       } else {
         const { data: memberRows } = await supabase
           .from('class_members')
           .select('class_id')
-          .eq('student_id', user.id)
+          .eq('student_id', currentUserId)
         enrolledClassIds = (memberRows || []).map((m) => m.class_id)
       }
 
@@ -55,7 +62,7 @@ export function NotificationProvider({ children }) {
       await Promise.all(
         enrolledClassIds.map(async (classId) => {
           const msgs = await messagesService.getClassMessages(classId)
-          const unread = messagesService.getUnreadCount(classId, user.id, msgs)
+          const unread = messagesService.getUnreadCount(classId, currentUserId, msgs)
           counts[classId] = unread
         })
       )
@@ -64,11 +71,12 @@ export function NotificationProvider({ children }) {
     } catch (err) {
       console.warn('[NotificationContext] Error loading class unread counts:', err)
     }
-  }, [user?.id, user?.role])
+  }, [user?.role])
 
   // Initial load and periodic refresh
   useEffect(() => {
     if (!user?.id) {
+      // Clear all state when logged out
       setNotifications([])
       setClassUnreadCounts({})
       setLoading(false)
@@ -80,28 +88,46 @@ export function NotificationProvider({ children }) {
       setLoading(false)
     })
 
-    // Fallback sync polling every 12 seconds
+    // Fallback sync polling every 15 seconds
     const interval = setInterval(() => {
       loadNotifications()
       loadClassUnreadCounts()
-    }, 12000)
+    }, 15000)
 
     return () => clearInterval(interval)
   }, [user?.id, loadNotifications, loadClassUnreadCounts])
 
   // 3. Realtime subscription to assignora-realtime channel
   useEffect(() => {
-    if (!user?.id) return
+    if (!user?.id) {
+      return
+    }
 
-    const channel = messagesService.getChannel()
+    let isSubscribed = true
+    let activeChannel = null
+
+    // Ensure any stale channel is cleanly removed first to prevent duplicates
+    const existing = supabase.getChannels().find((c) => c.topic === 'realtime:assignora-realtime')
+    if (existing) {
+      supabase.removeChannel(existing)
+    }
+
+    const channel = supabase.channel('assignora-realtime', {
+      config: { broadcast: { self: true } },
+    })
+    activeChannel = channel
 
     const handleBroadcast = ({ event, payload }) => {
+      if (!isSubscribed) return
+      const currentUserId = userIdRef.current
+      if (!currentUserId) return
+
       // Event: New Class Message
       if (event === 'class-message' && payload?.classId) {
         const { classId, senderId, message } = payload
 
         // Only count if sent by someone else
-        if (senderId !== user.id) {
+        if (senderId !== currentUserId) {
           setClassUnreadCounts((prev) => {
             const current = prev[classId] || 0
             return { ...prev, [classId]: current + 1 }
@@ -111,7 +137,7 @@ export function NotificationProvider({ children }) {
           setNotifications((prev) => [
             {
               id: `notif-${Date.now()}-${Math.random()}`,
-              user_id: user.id,
+              user_id: currentUserId,
               title: `New Message in Class`,
               message: `${message?.senderName || 'Someone'}: "${message?.text || 'Sent a message'}"`,
               type: 'announcement',
@@ -125,11 +151,11 @@ export function NotificationProvider({ children }) {
       }
 
       // Event: Direct Notification
-      if (event === 'notification' && payload?.userId === user.id) {
+      if (event === 'notification' && payload?.userId === currentUserId) {
         setNotifications((prev) => [
           {
             id: payload.id || `notif-${Date.now()}`,
-            user_id: user.id,
+            user_id: currentUserId,
             title: payload.title,
             message: payload.message,
             type: payload.type || 'general',
@@ -142,7 +168,7 @@ export function NotificationProvider({ children }) {
       }
 
       // Event: Messages Read
-      if (event === 'messages-read' && payload?.userId === user.id && payload?.classId) {
+      if (event === 'messages-read' && payload?.userId === currentUserId && payload?.classId) {
         setClassUnreadCounts((prev) => ({
           ...prev,
           [payload.classId]: 0,
@@ -152,8 +178,24 @@ export function NotificationProvider({ children }) {
 
     channel.on('broadcast', { event: '*' }, handleBroadcast)
 
+    channel.subscribe((status, error) => {
+      if (!isSubscribed) return
+      if (status === 'SUBSCRIBED') {
+        console.log('[NotificationContext] Realtime connected for user:', user.id)
+      } else if (status === 'CHANNEL_ERROR') {
+        console.warn('[NotificationContext] Realtime channel error:', error)
+      } else if (status === 'TIMED_OUT') {
+        console.warn('[NotificationContext] Realtime channel timed out')
+      }
+    })
+
     return () => {
-      channel.off('broadcast', { event: '*' }, handleBroadcast)
+      isSubscribed = false
+      if (activeChannel) {
+        // Use official Supabase Realtime cleanup API
+        supabase.removeChannel(activeChannel)
+        activeChannel = null
+      }
     }
   }, [user?.id])
 
@@ -174,20 +216,22 @@ export function NotificationProvider({ children }) {
 
   // Action: Mark all notifications as read
   const markAllNotificationsAsRead = useCallback(async () => {
-    if (!user?.id) return
+    const currentUserId = userIdRef.current
+    if (!currentUserId) return
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })))
 
     try {
-      await notificationsService.markAllAsRead(user.id)
+      await notificationsService.markAllAsRead(currentUserId)
     } catch (err) {
       console.warn('Could not persist markAllAsRead in DB:', err)
     }
-  }, [user?.id])
+  }, [])
 
   // Action: Mark a class's messages as read
   const markClassAsRead = useCallback(
     (classId) => {
-      if (!classId || !user?.id) return
+      const currentUserId = userIdRef.current
+      if (!classId || !currentUserId) return
 
       // Optimistic update
       setClassUnreadCounts((prev) => ({
@@ -196,9 +240,9 @@ export function NotificationProvider({ children }) {
       }))
 
       // Persist & broadcast
-      messagesService.markClassAsRead(classId, user.id)
+      messagesService.markClassAsRead(classId, currentUserId)
     },
-    [user?.id]
+    []
   )
 
   // Derived metrics

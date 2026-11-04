@@ -3,21 +3,28 @@ import { supabase } from '../lib/supabase.js'
 const REALTIME_CHANNEL = 'assignora-realtime'
 let globalChannel = null
 const memoryStore = new Map()
+const busListeners = new Set()
 
 export const messagesService = {
   /**
    * Initialize or retrieve the global Supabase Realtime channel
    */
   getChannel() {
+    const existing = supabase.getChannels().find((c) => c.topic === `realtime:${REALTIME_CHANNEL}`)
+    if (existing) {
+      return existing
+    }
     if (!globalChannel) {
       globalChannel = supabase.channel(REALTIME_CHANNEL, {
         config: {
           broadcast: { self: true },
         },
       })
-      globalChannel.subscribe((status) => {
+      globalChannel.subscribe((status, err) => {
         if (status === 'SUBSCRIBED') {
           console.log('[messagesService] Realtime channel connected.')
+        } else if (status === 'CHANNEL_ERROR') {
+          console.warn('[messagesService] Channel error:', err)
         }
       })
     }
@@ -25,9 +32,19 @@ export const messagesService = {
   },
 
   /**
-   * Broadcast an event over the realtime channel
+   * Broadcast an event over the realtime channel and notify bus listeners
    */
   async broadcast(event, payload) {
+    // 1. Notify in-memory listeners immediately
+    busListeners.forEach((fn) => {
+      try {
+        fn({ event, payload })
+      } catch (e) {
+        console.warn('[messagesService] bus listener error:', e)
+      }
+    })
+
+    // 2. Broadcast over global realtime channel for notifications & counters
     try {
       const ch = this.getChannel()
       await ch.send({
@@ -36,21 +53,34 @@ export const messagesService = {
         payload,
       })
     } catch (err) {
-      console.warn('[messagesService] Broadcast failed:', err)
+      console.warn('[messagesService] Global broadcast failed:', err)
+    }
+
+    // 3. If payload has classId, also broadcast to the class-specific channel
+    if (payload?.classId) {
+      try {
+        const classTopic = `class-discussion:${payload.classId}`
+        const existingClassCh = supabase.getChannels().find((c) => c.topic === `realtime:${classTopic}`)
+        if (existingClassCh) {
+          await existingClassCh.send({
+            type: 'broadcast',
+            event,
+            payload,
+          })
+        }
+      } catch (err) {
+        console.warn('[messagesService] Class broadcast failed:', err)
+      }
     }
   },
 
   /**
-   * Subscribe to realtime broadcast events
+   * Subscribe to in-memory broadcast events with safe cleanup
    */
   subscribe(callback) {
-    const ch = this.getChannel()
-    const handler = ({ event, payload }) => {
-      callback(event, payload)
-    }
-    ch.on('broadcast', { event: '*' }, handler)
+    busListeners.add(callback)
     return () => {
-      // unsubscribe logic if needed
+      busListeners.delete(callback)
     }
   },
 

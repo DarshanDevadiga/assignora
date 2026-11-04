@@ -37,6 +37,7 @@ import { announcementsService } from '../../services/announcements.service'
 import { messagesService } from '../../services/messages.service'
 import { notificationsService } from '../../services/notifications.service'
 import { useNotifications } from '../../context/NotificationContext'
+import { supabase } from '../../lib/supabase.js'
 import { calculateCompletionRate, isOverdue, formatDisplayDate, formatDeadlineBadge } from '../../utils/calculations'
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
@@ -196,12 +197,26 @@ export default function ClassDetailPage() {
   // Listen for realtime broadcast messages
   useEffect(() => {
     if (!classId) return
-    const channel = messagesService.getChannel()
+
+    let isSubscribed = true
+    let classChannel = null
+
+    // Clean up any pre-existing channel for this specific class
+    const existing = supabase.getChannels().find((c) => c.topic === `realtime:class-discussion:${classId}`)
+    if (existing) {
+      supabase.removeChannel(existing)
+    }
+
+    const channel = supabase.channel(`class-discussion:${classId}`, {
+      config: { broadcast: { self: true } },
+    })
+    classChannel = channel
 
     const handleBroadcast = ({ event, payload }) => {
+      if (!isSubscribed) return
       if (event === 'class-message' && payload?.classId === classId) {
         setMessages((prev) => {
-          if (prev.some((m) => m.id === payload.message.id)) return prev
+          if (prev.some((m) => m.id === payload.message?.id)) return prev
           return [...prev, payload.message]
         })
         if (activeTab === 'messages' && markClassAsRead) {
@@ -211,8 +226,27 @@ export default function ClassDetailPage() {
     }
 
     channel.on('broadcast', { event: '*' }, handleBroadcast)
+
+    channel.subscribe((status, error) => {
+      if (!isSubscribed) return
+      if (status === 'CHANNEL_ERROR') {
+        console.warn(`[ClassDetailPage] Realtime channel error for class ${classId}:`, error)
+      }
+    })
+
+    // Also register with messagesService in-memory bus for instant same-client updates
+    const unsubscribeBus = messagesService.subscribe(({ event, payload }) => {
+      handleBroadcast({ event, payload })
+    })
+
     return () => {
-      channel.off('broadcast', { event: '*' }, handleBroadcast)
+      isSubscribed = false
+      unsubscribeBus()
+      if (classChannel) {
+        // Use official Supabase Realtime cleanup API
+        supabase.removeChannel(classChannel)
+        classChannel = null
+      }
     }
   }, [classId, activeTab, markClassAsRead])
 

@@ -1,29 +1,56 @@
 # Dependencies
-node_modules
+node_modules/
 .pnp
 .pnp.js
 
-# Testing
-coverage
+# Testing and Coverage
+coverage/
+*.lcov
 
-# Production
-dist
-build
+# Production Builds
+dist/
+dist-ssr/
+build/
+*.local
 
-# Environment files
+# Environment and Secret Files
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
 *.env
+!.env.example
 
-# IDE and OS files
-.vscode/
+# Local Supabase temporary files
+.supabase/
+supabase/.temp/
+supabase/.branches/
+
+# Vite Cache & Bundler Output
+.vite/
+
+# IDE, Editor, and Tool Configurations
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
 .idea/
+*.sublime-project
+*.sublime-workspace
+
+# Operating System Files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+[Dd]esktop.ini
+
+# Logs & Temporary Files
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+*.tmp
+*.bak
+*.swp

@@ -300,9 +300,9 @@ export default function AssignmentsList() {
                     <Button
                       variant="primary"
                       size="sm"
-                      onClick={() => navigate('/admin/submissions')}
+                      onClick={() => navigate(`/admin/assignments/${assignment.id}`)}
                     >
-                      Track
+                      Track Submissions
                     </Button>
 
                     <button

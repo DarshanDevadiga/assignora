@@ -15,6 +15,13 @@ export function isOverdue(dueDate, dueTime) {
   return deadline < new Date()
 }
 
+export function isSubmissionLate(dueDate, dueTime, submittedAt) {
+  if (!dueDate || !submittedAt) return false
+  const time = dueTime || '23:59:59'
+  const deadline = new Date(`${dueDate}T${time}`)
+  return new Date(submittedAt) > deadline
+}
+
 export function getDaysRemaining(dueDate, dueTime) {
   if (!dueDate) return null
   const time = dueTime || '23:59:59'
@@ -95,4 +102,18 @@ export function exportToCSV(filename, rows, headers) {
   link.click()
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
+}
+
+/**
+ * Calculate letter grade from score and total points
+ */
+export function calculateLetterGrade(score, totalPoints) {
+  if (score === null || score === undefined || score === '' || !totalPoints) return '—'
+  const pct = (Number(score) / Number(totalPoints)) * 100
+  if (pct >= 90) return 'A+'
+  if (pct >= 80) return 'A'
+  if (pct >= 70) return 'B'
+  if (pct >= 60) return 'C'
+  if (pct >= 50) return 'D'
+  return 'F'
 }

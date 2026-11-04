@@ -242,14 +242,14 @@ export default function AdminDashboard() {
           value={totalSubmissionsCount}
           label="Submissions"
           color="green"
-          onClick={() => navigate('/admin/submissions')}
+          onClick={() => navigate('/admin/assignments')}
         />
         <StatCard
           icon={BarChart2}
           value={`${avgCompletionRate}%`}
           label="Avg. Completion"
           color="blue"
-          onClick={() => navigate('/admin/grades')}
+          onClick={() => navigate('/admin/assignments')}
         />
       </div>
 
@@ -590,7 +590,7 @@ export default function AdminDashboard() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => navigate('/admin/submissions')}
+                        onClick={() => navigate(`/admin/assignments/${a.id}`)}
                       >
                         Track
                       </Button>
@@ -781,7 +781,7 @@ export default function AdminDashboard() {
               {upcomingAssignments.map((item) => (
                 <div
                   key={item.id}
-                  onClick={() => navigate('/admin/submissions')}
+                  onClick={() => navigate(`/admin/assignments/${item.id}`)}
                   className="p-3 rounded-xl bg-slate-50 border-l-4 border-l-brand-primary border-y border-r border-brand-line/60 hover:bg-slate-100 transition-all cursor-pointer"
                 >
                   <h5 className="text-xs font-semibold text-brand-heading truncate">

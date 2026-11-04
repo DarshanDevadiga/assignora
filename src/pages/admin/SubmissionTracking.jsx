@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
   Users,
@@ -14,41 +14,61 @@ import {
   Check,
   AlertCircle,
   FileText,
-  Share2,
-  MoreVertical,
+  Award,
   ChevronDown
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { assignmentsService } from '../../services/assignments.service'
-import { classesService } from '../../services/classes.service'
-import { calculateCompletionRate, isOverdue, formatDisplayDate, exportToCSV } from '../../utils/calculations'
+import { submissionsService } from '../../services/submissions.service'
+import { notificationsService } from '../../services/notifications.service'
+import { messagesService } from '../../services/messages.service'
+import {
+  calculateCompletionRate,
+  isOverdue,
+  isSubmissionLate,
+  formatDisplayDate,
+  calculateLetterGrade,
+  exportToCSV
+} from '../../utils/calculations'
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
 import ProgressBar from '../../components/common/ProgressBar'
 import Modal from '../../components/common/Modal'
+import { Input, Textarea } from '../../components/common/Input'
 
 export default function SubmissionTracking() {
+  const { id: paramAssignmentId } = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuth()
   const navigate = useNavigate()
-  const [searchParams, setSearchParams] = useSearchParams()
 
   const [assignments, setAssignments] = useState([])
-  const [selectedAssignmentId, setSelectedAssignmentId] = useState('')
+  const [selectedAssignmentId, setSelectedAssignmentId] = useState(
+    paramAssignmentId || searchParams.get('id') || ''
+  )
   const [currentAssignment, setCurrentAssignment] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Filtering & Search
+  // Filtering, Search & Sort
   const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all') // all, submitted, pending, not_submitted
+  const [statusFilter, setStatusFilter] = useState('all') // all, submitted, pending, late, graded
   const [sortOrder, setSortOrder] = useState('nameAsc')
 
-  // Submission detail modal
+  // Grading Modal State
   const [inspectedStudent, setInspectedStudent] = useState(null)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
+  const [modalMarks, setModalMarks] = useState('')
+  const [modalFeedback, setModalFeedback] = useState('')
+  const [savingGrade, setSavingGrade] = useState(false)
+  const [gradeError, setGradeError] = useState('')
 
-  // Points grading map (persisted in local component state for demo grading)
-  const [gradesMap, setGradesMap] = useState({})
+  // Sync parameter assignment ID if route changes
+  useEffect(() => {
+    if (paramAssignmentId && paramAssignmentId !== selectedAssignmentId) {
+      setSelectedAssignmentId(paramAssignmentId)
+    }
+  }, [paramAssignmentId])
 
   useEffect(() => {
     loadAssignments()
@@ -61,9 +81,9 @@ export default function SubmissionTracking() {
       const list = await assignmentsService.getAdminAssignments(user.id)
       setAssignments(list)
 
-      const paramId = searchParams.get('id')
-      if (paramId && list.some((a) => a.id === paramId)) {
-        setSelectedAssignmentId(paramId)
+      const targetId = paramAssignmentId || searchParams.get('id')
+      if (targetId) {
+        setSelectedAssignmentId(targetId)
       } else if (list.length > 0) {
         setSelectedAssignmentId(list[0].id)
       }
@@ -89,13 +109,15 @@ export default function SubmissionTracking() {
     }
   }
 
+  const handleSwitchAssignment = (newId) => {
+    setSelectedAssignmentId(newId)
+    navigate(`/admin/assignments/${newId}`)
+  }
+
   // Derive all assigned students and their submission records
   const studentRows = useMemo(() => {
     if (!currentAssignment) return []
 
-    // Eligible students:
-    // If assign_to_all is true, all students in class_members
-    // If assign_to_all is false, students in assignment_students
     let eligible = []
     if (currentAssignment.assign_to_all) {
       eligible =
@@ -103,6 +125,9 @@ export default function SubmissionTracking() {
     } else {
       eligible =
         currentAssignment.assignment_students?.map((s) => s.users).filter(Boolean) || []
+      if (eligible.length === 0 && currentAssignment.classes?.class_members) {
+        eligible = currentAssignment.classes.class_members.map((m) => m.users).filter(Boolean)
+      }
     }
 
     const pastDeadline = isOverdue(currentAssignment.due_date, currentAssignment.due_time)
@@ -110,33 +135,88 @@ export default function SubmissionTracking() {
 
     return eligible.map((student, idx) => {
       const sub = submissionsList.find((s) => s.student_id === student.id)
+      const parsed = sub
+        ? submissionsService.parseSubmissionComment(sub.comment)
+        : { text: '', grade: null, feedback: '' }
+
+      const rawMarks =
+        parsed.grade !== null && parsed.grade !== undefined
+          ? parsed.grade
+          : sub?.grade !== null && sub?.grade !== undefined
+          ? sub.grade
+          : null
+
+      const isGraded = Boolean(
+        sub && (sub.status === 'reviewed' || (rawMarks !== null && rawMarks !== undefined))
+      )
+      const isSubmitted = Boolean(sub && (sub.submission_link || sub.submitted_at || sub.comment))
+      const isLateSubmission = Boolean(
+        sub?.submitted_at &&
+          isSubmissionLate(currentAssignment.due_date, currentAssignment.due_time, sub.submitted_at)
+      )
+      const isOverdueWithoutSub = Boolean(!isSubmitted && pastDeadline)
+
       let status = 'pending'
-      if (sub) {
-        status = 'submitted'
-      } else if (pastDeadline) {
+      if (isGraded) {
+        status = 'graded'
+      } else if (isSubmitted) {
+        status = isLateSubmission ? 'late' : 'submitted'
+      } else if (isOverdueWithoutSub) {
         status = 'not_submitted'
+      } else {
+        status = 'pending'
       }
+
+      const letterGrade = isGraded
+        ? calculateLetterGrade(rawMarks, currentAssignment.points)
+        : '—'
 
       return {
         id: student.id,
         name: student.name || `Student ${idx + 1}`,
-        email: student.email,
+        email: student.email || '',
+        avatar: student.avatar || '',
         student_id: student.student_id || `MCA2600${idx + 1}`,
         submission: sub || null,
-        status, // 'submitted' | 'pending' | 'not_submitted'
+        status,
+        isGraded,
+        isSubmitted,
+        isLateSubmission,
+        isOverdueWithoutSub,
         submitted_at: sub?.submitted_at || null,
         submission_link: sub?.submission_link || null,
-        comment: sub?.comment || '',
-        points: gradesMap[student.id] || (sub ? currentAssignment.points : '—'),
+        studentNote: parsed.text || '',
+        marks: rawMarks,
+        letterGrade,
+        feedback: parsed.feedback || '',
       }
     })
-  }, [currentAssignment, gradesMap])
+  }, [currentAssignment])
 
-  // Filtered rows
+  // Summary Metrics
+  const totalEligible = studentRows.length
+  const submittedCount = studentRows.filter((r) => r.isSubmitted).length
+  const pendingCount = studentRows.filter((r) => !r.isSubmitted && !r.isOverdueWithoutSub).length
+  const lateCount = studentRows.filter(
+    (r) => r.isLateSubmission || (!r.isSubmitted && r.isOverdueWithoutSub)
+  ).length
+  const gradedCount = studentRows.filter((r) => r.isGraded).length
+  const awaitingGradingCount = studentRows.filter((r) => r.isSubmitted && !r.isGraded).length
+  const completionRate = calculateCompletionRate(submittedCount, totalEligible)
+
+  // Filtered and Sorted Rows
   const filteredRows = useMemo(() => {
     return studentRows
       .filter((row) => {
-        if (statusFilter !== 'all' && row.status !== statusFilter) return false
+        if (statusFilter === 'submitted' && !row.isSubmitted) return false
+        if (statusFilter === 'pending' && (row.isSubmitted || row.isOverdueWithoutSub)) return false
+        if (
+          statusFilter === 'late' &&
+          !(row.isLateSubmission || (!row.isSubmitted && row.isOverdueWithoutSub))
+        )
+          return false
+        if (statusFilter === 'graded' && !row.isGraded) return false
+
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase()
           return (
@@ -150,19 +230,95 @@ export default function SubmissionTracking() {
       .sort((a, b) => {
         if (sortOrder === 'nameAsc') return a.name.localeCompare(b.name)
         if (sortOrder === 'nameDesc') return b.name.localeCompare(a.name)
-        if (sortOrder === 'submittedFirst') {
-          return (b.submission ? 1 : 0) - (a.submission ? 1 : 0)
+        if (sortOrder === 'submittedDesc') {
+          if (!a.submitted_at && !b.submitted_at) return 0
+          if (!a.submitted_at) return 1
+          if (!b.submitted_at) return -1
+          return new Date(b.submitted_at) - new Date(a.submitted_at)
+        }
+        if (sortOrder === 'scoreDesc') {
+          const scoreA = a.marks ?? -1
+          const scoreB = b.marks ?? -1
+          return scoreB - scoreA
+        }
+        if (sortOrder === 'scoreAsc') {
+          const scoreA = a.marks ?? 99999
+          const scoreB = b.marks ?? 99999
+          return scoreA - scoreB
         }
         return 0
       })
   }, [studentRows, statusFilter, searchQuery, sortOrder])
 
-  // Aggregate counters
-  const totalEligible = studentRows.length
-  const submittedCount = studentRows.filter((r) => r.status === 'submitted').length
-  const pendingCount = studentRows.filter((r) => r.status === 'pending').length
-  const notSubmittedCount = studentRows.filter((r) => r.status === 'not_submitted').length
-  const completionRate = calculateCompletionRate(submittedCount, totalEligible)
+  // Open Teacher Grading Modal
+  const openGradingModal = (row) => {
+    setInspectedStudent(row)
+    setModalMarks(
+      row.marks !== null && row.marks !== undefined && row.marks !== '—'
+        ? String(row.marks)
+        : ''
+    )
+    setModalFeedback(row.feedback || '')
+    setGradeError('')
+    setIsDetailModalOpen(true)
+  }
+
+  // Save / Update Grade persistently in Supabase
+  const handleSaveGrade = async (e) => {
+    e.preventDefault()
+    if (!inspectedStudent || !currentAssignment) return
+
+    const numMarks = Number(modalMarks)
+    if (isNaN(numMarks) || numMarks < 0 || numMarks > (currentAssignment.points || 100)) {
+      setGradeError(
+        `Please enter a valid numeric score between 0 and ${currentAssignment.points || 100}.`
+      )
+      return
+    }
+
+    try {
+      setSavingGrade(true)
+      setGradeError('')
+
+      // 1. Persist to submissions table
+      await submissionsService.saveGrade({
+        assignmentId: currentAssignment.id,
+        studentId: inspectedStudent.id,
+        grade: numMarks,
+        feedback: modalFeedback.trim(),
+      })
+
+      const letter = calculateLetterGrade(numMarks, currentAssignment.points)
+
+      // 2. Insert notification record for the student
+      await notificationsService.createNotification({
+        userId: inspectedStudent.id,
+        title: `Assignment Graded: ${currentAssignment.title}`,
+        message: `Your score: ${numMarks}/${currentAssignment.points} pts (${letter}). Feedback: "${modalFeedback.trim() || 'Good work'}"`,
+        type: 'submission',
+        referenceId: currentAssignment.id,
+      })
+
+      // 3. Broadcast realtime update for live counter badge
+      await messagesService.broadcast('notification', {
+        userId: inspectedStudent.id,
+        title: `Assignment Graded: ${currentAssignment.title}`,
+        message: `Your score: ${numMarks}/${currentAssignment.points} pts (${letter}).`,
+        type: 'submission',
+        referenceId: currentAssignment.id,
+        created_at: new Date().toISOString(),
+      })
+
+      // 4. Reload assignment details to refresh table and summary counters
+      await loadAssignmentDetails(currentAssignment.id)
+      setIsDetailModalOpen(false)
+    } catch (err) {
+      console.error('[SubmissionTracking] Error saving grade:', err)
+      setGradeError(err.message || 'Failed to save grade.')
+    } finally {
+      setSavingGrade(false)
+    }
+  }
 
   // Export CSV handler
   const handleExportCSV = () => {
@@ -173,11 +329,21 @@ export default function SubmissionTracking() {
       name: r.name,
       email: r.email,
       student_id: r.student_id,
-      status: r.status.toUpperCase(),
+      status: r.isGraded
+        ? 'GRADED'
+        : r.isSubmitted
+        ? r.isLateSubmission
+          ? 'SUBMITTED LATE'
+          : 'SUBMITTED'
+        : r.isOverdueWithoutSub
+        ? 'OVERDUE'
+        : 'PENDING',
       submitted_on: r.submitted_at ? new Date(r.submitted_at).toLocaleString() : 'N/A',
       submission_link: r.submission_link || 'N/A',
-      notes: r.comment || 'N/A',
-      points: r.points,
+      marks: r.marks !== null ? `${r.marks} / ${currentAssignment.points}` : 'N/A',
+      letter_grade: r.letterGrade,
+      feedback: r.feedback || 'N/A',
+      notes: r.studentNote || 'N/A',
     }))
 
     const headers = [
@@ -185,19 +351,25 @@ export default function SubmissionTracking() {
       { key: 'name', label: 'Student Name' },
       { key: 'email', label: 'Email' },
       { key: 'student_id', label: 'Student ID' },
-      { key: 'status', label: 'Submission Status' },
+      { key: 'status', label: 'Status' },
       { key: 'submitted_on', label: 'Submitted On' },
-      { key: 'submission_link', label: 'Submission Link' },
-      { key: 'points', label: 'Score' },
+      { key: 'submission_link', label: 'Deliverable Link' },
+      { key: 'marks', label: 'Marks' },
+      { key: 'letter_grade', label: 'Grade' },
+      { key: 'feedback', label: 'Instructor Feedback' },
       { key: 'notes', label: 'Student Notes' },
     ]
 
-    exportToCSV(`Submissions_${currentAssignment.title.replace(/\s+/g, '_')}`, exportData, headers)
+    exportToCSV(
+      `Submissions_${currentAssignment.title.replace(/\s+/g, '_')}`,
+      exportData,
+      headers
+    )
   }
 
   return (
     <div className="space-y-6">
-      {/* Back button */}
+      {/* Back button and page title */}
       <div>
         <button
           type="button"
@@ -211,23 +383,22 @@ export default function SubmissionTracking() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold text-brand-heading tracking-tight">
-              Assignment Submissions
+              Assignment Details & Submissions
             </h1>
             <p className="text-xs sm:text-sm text-brand-muted mt-1">
-              Track and manage student submissions, evaluate deliverables, and export performance reports.
+              Evaluate student deliverables, record scores and feedback, and monitor class completion.
             </p>
           </div>
 
           {/* Assignment Switcher Dropdown */}
           {assignments.length > 1 && (
             <div className="flex items-center gap-2">
-              <label className="text-xs font-bold text-brand-heading shrink-0">Switch Assignment:</label>
+              <label className="text-xs font-bold text-brand-heading shrink-0">
+                Switch Assignment:
+              </label>
               <select
                 value={selectedAssignmentId}
-                onChange={(e) => {
-                  setSelectedAssignmentId(e.target.value)
-                  setSearchParams({ id: e.target.value })
-                }}
+                onChange={(e) => handleSwitchAssignment(e.target.value)}
                 className="rounded-input border border-brand-line bg-white px-3 py-2 text-xs sm:text-sm font-semibold text-brand-heading focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20 cursor-pointer min-w-[200px]"
               >
                 {assignments.map((a) => (
@@ -261,11 +432,16 @@ export default function SubmissionTracking() {
                     <span>•</span>
                     <span className="flex items-center gap-1">
                       <Clock className="w-3.5 h-3.5 text-slate-400" />
-                      Due: {currentAssignment.due_date ? `${formatDisplayDate(currentAssignment.due_date)} at ${currentAssignment.due_time?.substring(0, 5) || '23:59'}` : 'No deadline'}
+                      Due:{' '}
+                      {currentAssignment.due_date
+                        ? `${formatDisplayDate(currentAssignment.due_date)} at ${
+                            currentAssignment.due_time?.substring(0, 5) || '23:59'
+                          }`
+                        : 'No deadline'}
                     </span>
                     <span>•</span>
                     <span className="font-semibold text-brand-primary">
-                      {currentAssignment.points} Points
+                      {currentAssignment.points} Total Points
                     </span>
                   </p>
                 </div>
@@ -295,81 +471,101 @@ export default function SubmissionTracking() {
               </div>
             </div>
 
-            {/* 4 Stat Counters + Completion Progress Bar */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 pt-1">
+            {/* 6 Summary Cards: Total, Submitted, Pending, Late, Graded, Awaiting Grading */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 pt-1">
+              {/* Total Enrolled */}
               <div className="p-3.5 rounded-xl bg-slate-50 border border-brand-line/60 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-purple-100 text-brand-primary flex items-center justify-center shrink-0">
-                  <Users className="w-5 h-5" />
+                <div className="w-9 h-9 rounded-lg bg-purple-100 text-brand-primary flex items-center justify-center shrink-0">
+                  <Users className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className="text-xl font-extrabold text-brand-heading leading-none">
+                  <div className="text-lg font-extrabold text-brand-heading leading-none">
                     {totalEligible}
                   </div>
-                  <div className="text-xs font-medium text-brand-muted mt-1">
-                    Total Students
+                  <div className="text-[11px] font-medium text-brand-muted mt-1">
+                    Enrolled
                   </div>
                 </div>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-brand-line/60 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
-                  <CheckCircle2 className="w-5 h-5" />
+              {/* Submitted */}
+              <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-100 flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
+                  <CheckCircle2 className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className="text-xl font-extrabold text-brand-heading leading-none">
+                  <div className="text-lg font-extrabold text-emerald-700 leading-none">
                     {submittedCount}
                   </div>
-                  <div className="text-xs font-medium text-brand-muted mt-1">
+                  <div className="text-[11px] font-medium text-emerald-600 mt-1">
                     Submitted
                   </div>
                 </div>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-brand-line/60 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
-                  <Clock className="w-5 h-5" />
+              {/* Pending */}
+              <div className="p-3.5 rounded-xl bg-amber-50/60 border border-amber-100 flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
+                  <Clock className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className="text-xl font-extrabold text-brand-heading leading-none">
+                  <div className="text-lg font-extrabold text-amber-700 leading-none">
                     {pendingCount}
                   </div>
-                  <div className="text-xs font-medium text-brand-muted mt-1">
+                  <div className="text-[11px] font-medium text-amber-600 mt-1">
                     Pending
                   </div>
                 </div>
               </div>
 
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-brand-line/60 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
-                  <XCircle className="w-5 h-5" />
+              {/* Late Submissions */}
+              <div className="p-3.5 rounded-xl bg-rose-50/60 border border-rose-100 flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                  <XCircle className="w-4 h-4" />
                 </div>
                 <div>
-                  <div className="text-xl font-extrabold text-brand-heading leading-none">
-                    {notSubmittedCount}
+                  <div className="text-lg font-extrabold text-rose-700 leading-none">
+                    {lateCount}
                   </div>
-                  <div className="text-xs font-medium text-brand-muted mt-1">
-                    Not Submitted
+                  <div className="text-[11px] font-medium text-rose-600 mt-1">
+                    Late Submissions
                   </div>
                 </div>
               </div>
 
-              {/* Completion Rate Pill */}
-              <div className="col-span-2 lg:col-span-1 p-3.5 rounded-xl bg-brand-light/40 border border-brand-border/80 flex flex-col justify-center">
-                <div className="flex items-center justify-between text-xs font-bold mb-1.5">
-                  <span className="text-brand-heading">Completion Rate</span>
-                  <span className="text-brand-primary">{completionRate}%</span>
+              {/* Graded */}
+              <div className="p-3.5 rounded-xl bg-purple-50/60 border border-purple-100 flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-purple-100 text-brand-primary flex items-center justify-center shrink-0">
+                  <Award className="w-4 h-4" />
                 </div>
-                <ProgressBar
-                  value={submittedCount}
-                  max={totalEligible || 1}
-                  size="sm"
-                  color="purple"
-                />
+                <div>
+                  <div className="text-lg font-extrabold text-purple-700 leading-none">
+                    {gradedCount}
+                  </div>
+                  <div className="text-[11px] font-medium text-purple-600 mt-1">
+                    Graded
+                  </div>
+                </div>
+              </div>
+
+              {/* Awaiting Grading */}
+              <div className="p-3.5 rounded-xl bg-indigo-50/60 border border-indigo-100 flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
+                  <Clock className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-lg font-extrabold text-indigo-700 leading-none">
+                    {awaitingGradingCount}
+                  </div>
+                  <div className="text-[11px] font-medium text-indigo-600 mt-1">
+                    Awaiting Grading
+                  </div>
+                </div>
               </div>
             </div>
           </Card>
 
-          {/* Status Tabs matching reference */}
+          {/* Status Tabs / Filters */}
           <div className="flex items-center gap-2 border-b border-brand-line/80 pb-2 text-xs sm:text-sm font-semibold overflow-x-auto">
             <button
               type="button"
@@ -409,14 +605,26 @@ export default function SubmissionTracking() {
 
             <button
               type="button"
-              onClick={() => setStatusFilter('not_submitted')}
+              onClick={() => setStatusFilter('late')}
               className={`px-3.5 py-1.5 rounded-full transition-all cursor-pointer ${
-                statusFilter === 'not_submitted'
+                statusFilter === 'late'
                   ? 'bg-rose-600 text-white shadow-xs'
                   : 'text-brand-muted hover:text-brand-heading hover:bg-slate-100'
               }`}
             >
-              Not Submitted ({notSubmittedCount})
+              Late ({lateCount})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStatusFilter('graded')}
+              className={`px-3.5 py-1.5 rounded-full transition-all cursor-pointer ${
+                statusFilter === 'graded'
+                  ? 'bg-purple-700 text-white shadow-xs'
+                  : 'text-brand-muted hover:text-brand-heading hover:bg-slate-100'
+              }`}
+            >
+              Graded ({gradedCount})
             </button>
           </div>
 
@@ -434,33 +642,37 @@ export default function SubmissionTracking() {
             </div>
 
             <div className="flex items-center gap-2 self-end sm:self-auto">
-              <span className="text-xs text-brand-muted font-medium">Sort:</span>
+              <span className="text-xs text-brand-muted font-medium">Sort by:</span>
               <select
                 value={sortOrder}
                 onChange={(e) => setSortOrder(e.target.value)}
                 className="rounded-lg border border-brand-line bg-white px-3 py-1.5 text-xs font-semibold text-brand-heading focus:border-brand-primary focus:outline-none cursor-pointer"
               >
-                <option value="nameAsc">Name (A – Z)</option>
-                <option value="nameDesc">Name (Z – A)</option>
-                <option value="submittedFirst">Submitted First</option>
+                <option value="nameAsc">Student Name (A – Z)</option>
+                <option value="nameDesc">Student Name (Z – A)</option>
+                <option value="submittedDesc">Submission Date (Newest first)</option>
+                <option value="scoreDesc">Marks (Highest first)</option>
+                <option value="scoreAsc">Marks (Lowest first)</option>
               </select>
             </div>
           </div>
 
-          {/* Submissions Table matching reference screenshots */}
+          {/* Student Submission Table */}
           <Card padding="p-0" className="overflow-hidden shadow-card">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs sm:text-sm">
                 <thead className="bg-slate-50/80 border-b border-brand-line/60 text-brand-muted uppercase text-[11px] font-bold">
                   <tr>
                     <th className="py-3 px-4">#</th>
-                    <th className="py-3 px-4">Student Name</th>
-                    <th className="py-3 px-4">Student ID / Roll No</th>
+                    <th className="py-3 px-4">Student</th>
                     <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4">Submission Deliverable</th>
-                    <th className="py-3 px-4">Submitted On</th>
-                    <th className="py-3 px-4">Points</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
+                    <th className="py-3 px-4">Submitted At</th>
+                    <th className="py-3 px-4">Submitted Deliverable</th>
+                    <th className="py-3 px-4">Marks Obtained</th>
+                    <th className="py-3 px-4">Total Marks</th>
+                    <th className="py-3 px-4">Grade</th>
+                    <th className="py-3 px-4">Feedback</th>
+                    <th className="py-3 px-4 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-brand-line/50">
@@ -480,100 +692,154 @@ export default function SubmissionTracking() {
                           {idx + 1}
                         </td>
 
-                        {/* Student Name */}
+                        {/* Student Name & Email */}
                         <td className="py-3.5 px-4">
                           <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-brand-light text-brand-primary font-bold text-xs flex items-center justify-center shrink-0">
-                              {initials}
+                            <div className="w-8 h-8 rounded-full bg-brand-light text-brand-primary font-bold text-xs flex items-center justify-center shrink-0 overflow-hidden">
+                              {row.avatar ? (
+                                <img
+                                  src={row.avatar}
+                                  alt={row.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                initials
+                              )}
                             </div>
                             <div className="min-w-0">
                               <p className="font-semibold text-brand-heading truncate">
                                 {row.name}
                               </p>
                               <p className="text-[11px] text-brand-muted truncate">
-                                {row.email}
+                                {row.email} • {row.student_id}
                               </p>
                             </div>
                           </div>
                         </td>
 
-                        {/* Student ID */}
-                        <td className="py-3.5 px-4 font-medium text-brand-heading">
-                          {row.student_id}
-                        </td>
-
                         {/* Status */}
                         <td className="py-3.5 px-4">
-                          {row.status === 'submitted' ? (
-                            <Badge variant="success" size="sm" dot>
-                              Submitted
-                            </Badge>
-                          ) : row.status === 'pending' ? (
-                            <Badge variant="warning" size="sm" dot>
-                              Pending
+                          {row.isGraded ? (
+                            <div className="flex items-center gap-1.5">
+                              <Badge variant="success" size="sm" dot>
+                                Graded
+                              </Badge>
+                              {row.isLateSubmission && (
+                                <span className="text-[10px] text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded font-bold border border-rose-200">
+                                  Late
+                                </span>
+                              )}
+                            </div>
+                          ) : row.isSubmitted ? (
+                            row.isLateSubmission ? (
+                              <Badge variant="warning" size="sm" dot>
+                                Submitted Late
+                              </Badge>
+                            ) : (
+                              <Badge variant="primary" size="sm" dot>
+                                Submitted
+                              </Badge>
+                            )
+                          ) : row.isOverdueWithoutSub ? (
+                            <Badge variant="danger" size="sm" dot>
+                              Missing (Overdue)
                             </Badge>
                           ) : (
-                            <Badge variant="danger" size="sm" dot>
-                              Not Submitted
+                            <Badge variant="warning" size="sm" dot>
+                              Pending
                             </Badge>
                           )}
                         </td>
 
-                        {/* Submission Link */}
+                        {/* Submission Date & Time */}
+                        <td className="py-3.5 px-4 text-brand-muted text-xs whitespace-nowrap">
+                          {row.submitted_at ? (
+                            <span>
+                              {formatDisplayDate(row.submitted_at)},{' '}
+                              {new Date(row.submitted_at).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-medium">—</span>
+                          )}
+                        </td>
+
+                        {/* Submitted Deliverable */}
                         <td className="py-3.5 px-4">
                           {row.submission_link ? (
                             <a
                               href={row.submission_link}
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-primary hover:underline bg-brand-light px-2.5 py-1 rounded-lg truncate max-w-[200px]"
+                              className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-primary hover:underline bg-brand-light px-2.5 py-1 rounded-lg truncate max-w-[180px]"
                             >
                               <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                              <span className="truncate">View Submission</span>
+                              <span className="truncate">View Work</span>
                             </a>
+                          ) : row.studentNote ? (
+                            <span
+                              className="text-xs text-brand-heading truncate block max-w-[150px]"
+                              title={row.studentNote}
+                            >
+                              Note: {row.studentNote}
+                            </span>
                           ) : (
                             <span className="text-slate-400 font-medium">—</span>
                           )}
                         </td>
 
-                        {/* Submitted On */}
-                        <td className="py-3.5 px-4 text-brand-muted text-xs whitespace-nowrap">
-                          {row.submitted_at ? (
-                            <span>{formatDisplayDate(row.submitted_at)}, {new Date(row.submitted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        {/* Marks Obtained */}
+                        <td className="py-3.5 px-4 font-bold text-center">
+                          {row.marks !== null ? (
+                            <span className="text-emerald-700 text-sm">{row.marks}</span>
                           ) : (
-                            <span className="text-slate-400 font-medium">—</span>
+                            <span className="text-slate-400 font-normal italic">—</span>
                           )}
                         </td>
 
-                        {/* Points Grade input */}
-                        <td className="py-3.5 px-4">
-                          {row.status === 'submitted' ? (
-                            <input
-                              type="text"
-                              value={gradesMap[row.id] ?? currentAssignment.points}
-                              onChange={(e) =>
-                                setGradesMap({ ...gradesMap, [row.id]: e.target.value })
-                              }
-                              className="w-16 rounded border border-brand-line px-2 py-1 text-xs font-bold text-brand-heading focus:border-brand-primary focus:outline-none text-center"
-                            />
+                        {/* Total Marks */}
+                        <td className="py-3.5 px-4 font-semibold text-brand-muted text-center">
+                          {currentAssignment.points}
+                        </td>
+
+                        {/* Letter Grade */}
+                        <td className="py-3.5 px-4 text-center">
+                          {row.isGraded ? (
+                            <span className="inline-block px-2 py-0.5 rounded-full text-xs font-black bg-purple-100 text-purple-800">
+                              {row.letterGrade}
+                            </span>
                           ) : (
-                            <span className="text-slate-400 font-medium text-center block w-16">—</span>
+                            <span className="text-slate-400 font-normal italic">—</span>
                           )}
                         </td>
 
-                        {/* Actions */}
+                        {/* Feedback */}
+                        <td className="py-3.5 px-4 text-xs">
+                          {row.feedback ? (
+                            <span
+                              className="text-brand-heading truncate block max-w-[140px] italic"
+                              title={row.feedback}
+                            >
+                              "{row.feedback}"
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 italic">—</span>
+                          )}
+                        </td>
+
+                        {/* Action */}
                         <td className="py-3.5 px-4 text-right">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setInspectedStudent(row)
-                              setIsDetailModalOpen(true)
-                            }}
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-brand-heading hover:bg-slate-100 transition-colors cursor-pointer"
-                            title="View student details"
+                          <Button
+                            variant={row.isGraded ? 'outline' : row.isSubmitted ? 'primary' : 'ghost'}
+                            size="sm"
+                            icon={Award}
+                            className={row.isSubmitted && !row.isGraded ? 'shadow-purple-glow font-semibold' : ''}
+                            onClick={() => openGradingModal(row)}
                           >
-                            <Eye className="w-4 h-4" />
-                          </button>
+                            {row.isGraded ? 'Edit Grade' : row.isSubmitted ? 'Grade' : 'Review'}
+                          </Button>
                         </td>
                       </tr>
                     )
@@ -581,8 +847,8 @@ export default function SubmissionTracking() {
 
                   {filteredRows.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="py-12 text-center text-xs text-brand-muted">
-                        No students found matching current filter or search criteria.
+                      <td colSpan={10} className="py-12 text-center text-xs text-brand-muted">
+                        No student submissions found matching the criteria.
                       </td>
                     </tr>
                   )}
@@ -592,7 +858,9 @@ export default function SubmissionTracking() {
 
             {/* Pagination footer */}
             <div className="px-6 py-3.5 border-t border-brand-line/60 bg-slate-50/50 flex items-center justify-between text-xs text-brand-muted font-medium">
-              <span>Showing 1–{filteredRows.length} of {totalEligible} students</span>
+              <span>
+                Showing 1–{filteredRows.length} of {totalEligible} enrolled students
+              </span>
               <div className="flex items-center gap-1">
                 <span className="w-7 h-7 rounded-lg bg-brand-primary text-white font-bold flex items-center justify-center">
                   1
@@ -603,61 +871,160 @@ export default function SubmissionTracking() {
         </>
       )}
 
-      {/* Inspect Student Submission Modal */}
+      {/* Individual Student Submission & Grading Modal */}
       {inspectedStudent && (
         <Modal
           isOpen={isDetailModalOpen}
           onClose={() => setIsDetailModalOpen(false)}
-          title={`Student: ${inspectedStudent.name}`}
-          subtitle={`Roll No: ${inspectedStudent.student_id} • ${inspectedStudent.email}`}
-          footer={
-            <Button variant="outline" size="sm" onClick={() => setIsDetailModalOpen(false)}>
-              Close
-            </Button>
-          }
+          title={`Grade: ${inspectedStudent.name}`}
+          subtitle={`${inspectedStudent.email} • ID: ${inspectedStudent.student_id}`}
         >
-          <div className="space-y-4">
-            <div className="flex items-center justify-between p-3.5 rounded-xl bg-slate-50 border border-brand-line">
-              <span className="text-xs font-semibold text-brand-heading">Submission Status</span>
-              {inspectedStudent.status === 'submitted' ? (
-                <Badge variant="success" size="sm" dot>Submitted</Badge>
-              ) : (
-                <Badge variant="warning" size="sm" dot>Pending</Badge>
-              )}
-            </div>
+          <form onSubmit={handleSaveGrade} className="space-y-4">
+            {gradeError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{gradeError}</span>
+              </div>
+            )}
 
-            {inspectedStudent.submission_link && (
-              <div className="space-y-1.5">
-                <span className="text-xs font-semibold text-brand-heading">Submitted Deliverable Link:</span>
-                <div className="p-3 rounded-xl bg-slate-50 border border-brand-line text-xs font-medium text-brand-primary flex items-center justify-between gap-2">
-                  <span className="truncate">{inspectedStudent.submission_link}</span>
+            {/* Student & Deliverable Info Card */}
+            <div className="rounded-xl p-4 bg-slate-50 border border-brand-line space-y-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-brand-muted">Assignment:</span>
+                <strong className="text-brand-heading">{currentAssignment?.title}</strong>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-brand-muted">Submission Status:</span>
+                {inspectedStudent.isGraded ? (
+                  <Badge variant="success" size="sm" dot>
+                    Graded ({inspectedStudent.marks} / {currentAssignment?.points})
+                  </Badge>
+                ) : inspectedStudent.isSubmitted ? (
+                  inspectedStudent.isLateSubmission ? (
+                    <Badge variant="warning" size="sm" dot>
+                      Submitted Late
+                    </Badge>
+                  ) : (
+                    <Badge variant="primary" size="sm" dot>
+                      Submitted
+                    </Badge>
+                  )
+                ) : inspectedStudent.isOverdueWithoutSub ? (
+                  <Badge variant="danger" size="sm" dot>
+                    Missing (Overdue)
+                  </Badge>
+                ) : (
+                  <Badge variant="warning" size="sm" dot>
+                    Pending Submission
+                  </Badge>
+                )}
+              </div>
+
+              {inspectedStudent.submitted_at && (
+                <div className="flex items-center justify-between">
+                  <span className="text-brand-muted">Submitted At:</span>
+                  <span className="text-brand-heading font-medium">
+                    {formatDisplayDate(inspectedStudent.submitted_at)} at{' '}
+                    {new Date(inspectedStudent.submitted_at).toLocaleTimeString([], {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                </div>
+              )}
+
+              {inspectedStudent.submission_link && (
+                <div className="pt-2 border-t border-brand-line/60 flex items-center justify-between gap-3">
+                  <span className="text-brand-muted">Deliverable Link:</span>
                   <a
                     href={inspectedStudent.submission_link}
                     target="_blank"
                     rel="noreferrer"
-                    className="p-1 hover:text-brand-heading text-slate-500"
+                    className="inline-flex items-center gap-1.5 text-brand-primary font-bold hover:underline"
                   >
-                    <ExternalLink className="w-4 h-4" />
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open Work in New Tab</span>
                   </a>
                 </div>
-              </div>
-            )}
+              )}
 
-            {inspectedStudent.comment && (
+              {inspectedStudent.studentNote && (
+                <div className="pt-2 border-t border-brand-line/60 space-y-1">
+                  <span className="text-brand-muted block font-medium">Student Note:</span>
+                  <p className="text-brand-heading bg-white p-2.5 rounded-lg border border-brand-line leading-relaxed">
+                    "{inspectedStudent.studentNote}"
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Grading Controls */}
+            <div className="space-y-4 pt-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-brand-heading">
+                    Score / Marks (Max: {currentAssignment?.points || 100})
+                  </label>
+                  <Input
+                    type="number"
+                    min="0"
+                    max={currentAssignment?.points || 100}
+                    placeholder={`0 – ${currentAssignment?.points || 100}`}
+                    value={modalMarks}
+                    onChange={(e) => setModalMarks(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-brand-heading">Calculated Grade</label>
+                  <div className="h-10 px-3 py-2 rounded-xl border border-brand-line bg-slate-50 flex items-center justify-between">
+                    <span className="text-xs text-brand-muted font-medium">Grade preview:</span>
+                    <span className="text-sm font-black text-brand-primary">
+                      {modalMarks !== '' && !isNaN(Number(modalMarks))
+                        ? calculateLetterGrade(Number(modalMarks), currentAssignment?.points)
+                        : '—'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-1.5">
-                <span className="text-xs font-semibold text-brand-heading">Student Notes:</span>
-                <p className="text-xs text-brand-body bg-slate-50 p-3 rounded-xl border border-brand-line">
-                  {inspectedStudent.comment}
-                </p>
+                <label className="text-xs font-bold text-brand-heading">
+                  Instructor Feedback & Comments
+                </label>
+                <Textarea
+                  placeholder="Provide constructive feedback, suggestions or remarks for the student..."
+                  value={modalFeedback}
+                  onChange={(e) => setModalFeedback(e.target.value)}
+                  rows={3}
+                />
               </div>
-            )}
+            </div>
 
-            {inspectedStudent.submitted_at && (
-              <p className="text-xs text-brand-muted">
-                Submitted on: {formatDisplayDate(inspectedStudent.submitted_at)} at {new Date(inspectedStudent.submitted_at).toLocaleTimeString()}
-              </p>
-            )}
-          </div>
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-brand-line/60">
+              <Button
+                variant="secondary"
+                size="sm"
+                type="button"
+                onClick={() => setIsDetailModalOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                type="submit"
+                loading={savingGrade}
+                icon={Award}
+                className="shadow-purple-glow font-semibold"
+              >
+                Save & Publish Grade
+              </Button>
+            </div>
+          </form>
         </Modal>
       )}
     </div>

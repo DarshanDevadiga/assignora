@@ -4,10 +4,7 @@ import {
   Home,
   BookOpen,
   ClipboardList,
-  CheckSquare,
-  BarChart2,
   Users,
-  FileText,
   Settings,
   GraduationCap,
   Sparkles,
@@ -27,26 +24,22 @@ export default function Sidebar({
   const location = useLocation()
 
   const adminNav = [
-    { name: 'Home', path: '/admin', icon: Home, end: true },
-    { name: 'My Classes', path: '/admin/classes', icon: BookOpen },
+    { name: 'Dashboard', path: '/admin', icon: Home, end: true },
+    { name: 'Classes', path: '/admin/classes', icon: BookOpen },
     { name: 'Assignments', path: '/admin/assignments', icon: ClipboardList },
-    { name: 'Submissions', path: '/admin/submissions', icon: CheckSquare },
-    { name: 'Grades', path: '/admin/grades', icon: BarChart2 },
+    { name: 'Students', path: '/admin/students', icon: Users },
   ]
 
   const adminSecondaryNav = [
-    { name: 'Students', path: '/admin/students', icon: Users },
-    { name: 'Reports', path: '/admin/reports', icon: FileText },
-    { name: 'Profile', path: '/admin/profile', icon: User },
+    { name: 'Announcements', path: '/admin/announcements', icon: Bell },
+    { name: 'Teachers', path: '/admin/profile', icon: User },
     { name: 'Settings', path: '/admin/settings', icon: Settings },
   ]
 
   const studentNav = [
     { name: 'Dashboard', path: '/student', icon: Home, end: true },
     { name: 'My Classes', path: '/student/classes', icon: BookOpen },
-    { name: 'Assignments', path: '/student/assignments', icon: ClipboardList },
-    { name: 'My Submissions', path: '/student/submissions', icon: CheckSquare },
-    { name: 'Progress', path: '/student/progress', icon: BarChart2 },
+    { name: 'Announcements', path: '/student/announcements', icon: Bell },
   ]
 
   const studentSecondaryNav = [

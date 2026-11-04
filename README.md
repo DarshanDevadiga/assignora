@@ -1,23 +1,41 @@
 # Assignora — Assign. Track. Achieve.
 
 > **Production-Quality Educational Assignment & Academic Workflow Management Platform**  
-> *Developed for the Joineazy Frontend Development Assignment*
+> *A modern, role-isolated SaaS for professors, instructors, administrators, and students.*
 
 ---
 
-## 📖 1. Project Overview
+## 📖 1. Project Overview & Purpose
 
-**Assignora** is a modern, responsive educational assignment and academic workflow management SaaS platform designed for professors, administrators, and students. Inspired by Google Classroom with a sleek modern design system, Assignora streamlines coursework allocation, external submission tracking via Google Drive/GitHub, class roster management, stream announcements, and dynamic completion analytics.
+**Assignora** is an intuitive, modern academic workflow and learning management platform engineered to streamline coursework allocation, student submissions, evaluation, and classroom communication. Drawing inspiration from Google Classroom and modern SaaS productivity dashboards, Assignora delivers a purple-gradient design system with high usability, responsive layouts, and strict data security.
 
-The platform provides strictly separated, role-based experiences:
-- **Admin / Professor**: Full class lifecycle management, assignment creation (whole-class or selective student allocations), deadlines and points configuration, real-time submission tracking, student-wise status grids, gradebook analytics, and CSV exports.
-- **Student**: Google Classroom-inspired dashboard, enrolled courses overview, actionable assignment lists, two-step confirmation submission workflow, duplicate submission prevention, and personal progress tracking.
+The platform provides strictly separated, role-based workflows:
+- **Admin / Teacher**: Complete class lifecycle management, flexible assignment creation (whole-class or selective student allocations), deadlines and points configuration, real-time submission tracking, student-wise status grids, gradebook evaluation with constructive feedback, and CSV data export.
+- **Student**: Coursework dashboard, enrolled class streams, actionable assignment feeds, two-step submission confirmation workflow with deliverable link validation, celebratory completion feedback, duplicate submission guards, and personal progress analytics.
 
 ---
 
-## 🎨 2. Approved Brand Identity & Design Tokens
+## 🎯 2. Problem Statement & Project Objectives
 
-Assignora follows a strict, elegant design system:
+### The Problem
+Traditional educational institutions and courses frequently suffer from fragmented coursework processes:
+- **Scattered Submissions**: Deliverables shared across unorganized email chains, WhatsApp groups, or direct messages, causing missed deadlines and lost files.
+- **Lack of Real-Time Visibility**: Students lack a consolidated, clear picture of upcoming vs. overdue deadlines and personal completion rates.
+- **Grading Overhead**: Instructors spend excessive time reconciling spreadsheets, tracking late submissions manually, and distributing feedback individually.
+- **Disjointed Learning Resources**: Textbooks, lecture notes, and templates are distributed in silos rather than integrated directly into course streams.
+
+### Project Objectives
+1. **Centralize Assignment Workflows**: Create a single hub for course creation, assignment distribution, deliverable submission, and grading.
+2. **Ensure Data Integrity & Security**: Protect academic records through Postgres Row Level Security (RLS) and verified role-based access control.
+3. **Enhance Student Motivation**: Provide clear visual feedback through radial progress indicators, instant status badges, and two-step celebratory submission confirmation.
+4. **Foster Academic Communication**: Facilitate contextual class announcements, interactive discussion streams, and real-time WhatsApp-style unread notification counters.
+5. **Promote Open Education**: Integrate authentic Open Educational Resources (OER) directly into subject course views.
+
+---
+
+## 🎨 3. Design System & Tokens
+
+Assignora adheres to a purple-gradient design system with accessible contrast and responsive geometry:
 
 | Token Name | Hex Code | Visual Application |
 | :--- | :--- | :--- |
@@ -25,7 +43,7 @@ Assignora follows a strict, elegant design system:
 | **Primary Hover** | `#4C1D95` | Button hover and pressed states |
 | **Secondary Purple** | `#8B5CF6` | Sub-headers, secondary badges, illustrations |
 | **Light Purple** | `#EDE9FE` | Subtle container backgrounds, avatar rings |
-| **Active Navigation** | `#F1EDFF` | Active sidebar nav pill background |
+| **Active Navigation** | `#F1EDFF` | Active sidebar navigation pill background |
 | **Purple Border** | `#DDD6FE` | Accent card borders |
 | **App Canvas** | `#F8F9FF` | Main application background |
 | **Secondary Canvas** | `#F5F3FF` | Card gradients and secondary sections |
@@ -33,60 +51,94 @@ Assignora follows a strict, elegant design system:
 | **Headings** | `#111827` | Primary high-contrast text |
 | **Body** | `#374151` | Standard readable paragraph text |
 | **Muted** | `#64748B` | Labels, timestamps, placeholders |
-| **Success** | `#16A34A` | Submitted badges, positive progress |
-| **Warning** | `#F59E0B` | Pending submissions, due soon badges |
+| **Success** | `#16A34A` | Submitted badges, on-time submissions, positive progress |
+| **Warning** | `#F59E0B` | Pending submissions, due soon badges, late submissions |
 | **Danger** | `#EF4444` | Overdue deadlines, unsubmitted alerts |
 
-- **Typography**: Inter (Headings: 600–700, Body: 400, Buttons: 500–600)
-- **Geometry**: Cards: `14px` border-radius (`rounded-card`), Form inputs & buttons: `9px` radius, subtle shadows (`0 1px 3px rgba(0,0,0,0.05)`).
+- **Typography**: Inter (Headings: 600–700 font-weight, Body: 400, Buttons: 500–600).
+- **Geometry**: Cards: `14px` border radius (`rounded-card`), Form inputs & buttons: `9px` radius, subtle shadows (`0 1px 3px rgba(0,0,0,0.05)`).
 
 ---
 
-## ✨ 3. Core Features & Joineazy Requirements
+## ✨ 4. Main Features & Roles
 
-### 🔐 Authentication & Role-Based Access
-- Email and password authentication powered by **Supabase GoTrue Auth**.
-- Strict database-backed role validation (roles are read directly from `public.users` in Postgres, never trusted from client-side `localStorage`).
-- Pre-seeded quick-select demo accounts with instant auto-fill and validation.
-- Persistent sessions across browser refreshes and tab reloads.
-- Role-isolated routing (`/admin/*` vs. `/student/*`) with automatic redirect guards.
+### 🔐 Authentication & Session Security
+- **Email & Password Authentication**: Powered by Supabase Auth (GoTrue).
+- **Verified Role Resolution**: Role state (`admin` vs `student`) is queried directly from `public.users` in Postgres upon GoTrue authentication, preventing client-side privilege escalation.
+- **Role-Guarded Routing**: Separate route guards (`/admin/*` vs `/student/*`) with automatic redirect handling.
+- **Session Persistence**: Automatic token refresh and session persistence via browser local storage.
 
-### 👩‍🏫 Admin / Professor Workspace
-- **Dynamic Executive Dashboard**: Greeting banner, current date indicator, and 4 real-time metric cards (*Classes, Assignments, Submissions, Avg. Completion Rate*).
-- **Class Stream & Hero Banner**: Course details (*MCA – Semester 5*), enrolled student counters, and in-place announcement composer.
-- **My Classes Management**: Google Classroom-style grid cards with distinct gradient banners, course CRUD modals, and cascading deletion.
-- **Student Roster Management**: Class roster table, student search, enrollment dialog for available student accounts, and unenrollment safeguards.
-- **Assignment Creation & Allocation**: Rich description editor, Google Drive link resource attachment, due date/time pickers, points weighting, and **Assign to All** vs. **Select Students** modal.
-- **Submissions Tracking**: Student-by-student submission status (*Submitted, Pending, Not Submitted*), deliverable link viewer, student notes inspector, dynamic completion progress bar (`(Submitted / Assigned) × 100`), status filtering, search, and one-click **CSV Data Export**.
-- **Class Gradebook**: Matrix view of all assignment scores per student, overall point totals, dynamic letter grades (`A+` to `F`), and CSV export.
+### 👩‍🏫 Admin / Teacher Workspace
+- **Executive Dashboard**: Welcome banner, live metric cards (*Classes, Assignments, Submissions, Avg. Completion Rate*), and upcoming assignment timeline.
+- **Class Management**:
+  - Grid view of active classes with distinct gradient banners and student count badges.
+  - Dedicated Class Page with 5 tabs: **Overview**, **Assignments**, **People**, **Messages**, and **Resources**.
+  - Two-method student enrolment: unique 6-character class code lookup and direct student invitation modal.
+- **Assignment Creation & Control**:
+  - Modal with title, rich description, points weighting, due date and time pickers.
+  - Google Drive / resource URL attachment.
+  - Allocation targeting: **Assign to All Class Members** or **Select Specific Students**.
+- **Submission Tracking & Evaluation**:
+  - Detailed submission tracking table filtering by status (*Submitted, Graded, Pending, Late*).
+  - Inspect student deliverable links (Google Drive, GitHub, PDF) and student notes.
+  - In-place grading modal: enter marks, compute dynamic letter grades (`A+` to `F`), and save constructive teacher feedback.
+  - Real-time completion progress bar `(Submitted / Assigned) × 100`.
+  - One-click **CSV Data Export** of class submissions.
+- **People Page & Roster**:
+  - Tabular roster of enrolled students with avatars, student IDs, emails, and enrolment dates.
+  - Student profile viewer modal.
+  - Safe student removal with confirmation safeguard.
 
-### 👨‍🎓 Student Dashboard & Workflow
-- **Google Classroom-Inspired Home**: Welcome banner with 3D academic illustration, 4 live progress cards (*Total Assigned, Submitted, Pending, Completion Rate*).
-- **Radial Donut Progress Chart**: Visual SVG donut chart showing personal completion percentage with categorized legends.
-- **My Assignments Feed**: Actionable assignment cards with course badges, deadline countdowns, external Google Drive resources, and direct `[Submit]` actions.
-- **Two-Step Submission Confirmation**:
-  1. *Step 1*: Attach deliverable link (Drive/GitHub/Vercel) & notes → Click *"Yes, I have submitted"* → Modal dialog opens.
-  2. *Step 2*: Final confirmation dialog → Inserts submission record to Supabase → Triggers celebratory confetti (`canvas-confetti`) → Immediately locks form and updates status to *Submitted*.
-- **Duplicate Submission Guard**: Hard prevention both in UI and backed by Postgres database unique constraint on `(assignment_id, student_id)`.
-- **My Submissions**: Comprehensive archive of all student deliverables with timestamps and external link access.
+### 👨‍🎓 Student Workspace
+- **Coursework Dashboard**:
+  - Academic greeting banner with personalized stats (*Total Assigned, Submitted, Pending, Overall Completion Rate*).
+  - SVG radial donut chart illustrating personal coursework completion breakdown.
+  - Grid of enrolled classes with direct links to class streams.
+- **Assignments Feed**:
+  - Comprehensive list of assigned coursework grouped by deadline urgency.
+  - Direct access to teacher resources and submission modal.
+- **Two-Step Submission Flow**:
+  1. *Step 1*: Attach deliverable URL (Drive/Docs/GitHub) and add student commentary.
+  2. *Step 2*: Final submission confirmation dialog preventing accidental submissions.
+  3. *Celebratory Completion*: Triggers confetti animation (`canvas-confetti`) and immediately transitions status to *Submitted*.
+- **Duplicate Submission Guard**: Hard prevention both in the UI and enforced by a database unique constraint on `(assignment_id, student_id)`.
+- **Grade & Feedback Inspection**: Students view awarded marks, letter grades, and qualitative instructor feedback directly inside the assignment details view.
+
+### 📢 Announcements, Discussions & Real-Time Badges
+- **Formal Announcements**: Instructors post class-wide announcements broadcast to all enrolled students.
+- **Class Discussion Stream**: Dedicated interactive chat stream for peer and teacher inquiries.
+- **WhatsApp-Style Notifications**:
+  - Red notification badge on the sidebar bell icon displaying unread notification count (`1`, `5`, `12`, `99+`).
+  - Per-class unread counters indicating new messages in the class list.
+  - Dynamic Supabase Realtime channel integration with clean subscription teardown.
+
+### 📚 Open Educational Resources (OER)
+Integrated subject-specific curated academic resources in each class:
+- **OpenStax**: Peer-reviewed, open-source textbooks.
+- **MIT OpenCourseWare**: Lecture notes and syllabus frameworks.
+- **Open Textbook Library**: Supplementary academic reading.
+- **Google Docs / Sheets**: Practical analysis models, rubrics, and project templates.
+- **DOAB (Directory of Open Access Books)**: Peer-reviewed academic monographs.
 
 ---
 
-## 🛠️ 4. Technology Stack
+## 🛠️ 5. Technology Stack
 
-- **Frontend Framework**: React 18
-- **Build Tool & Bundler**: Vite 6 (with Rollup manual chunks code-splitting)
-- **Styling**: Tailwind CSS 3 & PostCSS
-- **Routing**: React Router DOM 6
-- **Database & Auth**: Supabase (PostgreSQL, GoTrue Auth, REST API, Row Level Security)
-- **Icons**: Lucide React
-- **Animations & Effects**: Canvas Confetti
+| Layer | Technology | Purpose |
+| :--- | :--- | :--- |
+| **Frontend Framework** | React 18 | Declarative component-driven user interface |
+| **Bundler & Dev Server**| Vite 6 | Rapid Hot Module Replacement (HMR) and optimized Rollup production builds |
+| **Styling** | Tailwind CSS 3 & PostCSS | Utility-first responsive design tokens |
+| **Routing** | React Router DOM 6 | Single-page application nested client routing with route guards |
+| **Database & Auth** | Supabase (PostgreSQL 15) | Relational database, GoTrue Auth, Realtime engine, and Row Level Security |
+| **Icons** | Lucide React | Modern SVG icon system |
+| **Visual Effects** | Canvas Confetti | Celebratory feedback for student submissions |
 
 ---
 
-## 🗄️ 5. Database Architecture & Schema
+## 🗄️ 6. Database Architecture & Schema
 
-The platform connects to Supabase PostgreSQL at `https://trkcagoxopabqerljgvn.supabase.co` with 8 relational tables and Row Level Security (RLS):
+The platform connects to Supabase PostgreSQL with 8 relational tables protected by Row Level Security (RLS):
 
 ```mermaid
 erDiagram
@@ -103,57 +155,108 @@ erDiagram
     assignments ||--o{ submissions : "receives"
 ```
 
-### Table Definitions:
-1. `users`: `id` (uuid, PK), `name` (text), `email` (text), `role` (`admin` | `student`), `avatar` (text), `student_id` (text), `created_at` (timestamptz).
-2. `classes`: `id` (uuid, PK), `name` (text), `subject` (text), `description` (text), `admin_id` (uuid, FK users.id), `created_at` (timestamptz).
-3. `class_members`: `id` (uuid, PK), `class_id` (uuid, FK classes.id), `student_id` (uuid, FK users.id), `joined_at` (timestamptz).
-4. `assignments`: `id` (uuid, PK), `title` (text), `description` (text), `class_id` (uuid, FK classes.id), `admin_id` (uuid, FK users.id), `due_date` (date), `due_time` (time), `drive_link` (text), `points` (numeric), `assign_to_all` (boolean), `status` (text), `created_at`, `updated_at`.
-5. `assignment_students`: `id` (uuid, PK), `assignment_id` (uuid, FK assignments.id), `student_id` (uuid, FK users.id), `assigned_at` (timestamptz).
-6. `submissions`: `id` (uuid, PK), `assignment_id` (uuid, FK assignments.id), `student_id` (uuid, FK users.id), `submission_link` (text), `comment` (text), `status` (text), `submitted_at`, `updated_at`. *Unique constraint on `(assignment_id, student_id)`*.
-7. `announcements`: `id` (uuid, PK), `title` (text), `message` (text), `admin_id` (uuid, FK users.id), `class_id` (uuid, FK classes.id), `is_published` (boolean), `created_at`, `updated_at`.
-8. `notifications`: `id` (uuid, PK), `user_id` (uuid, FK users.id), `title` (text), `message` (text), `type` (text), `reference_id` (text), `is_read` (boolean), `created_at` (timestamptz).
+### Table Definitions
 
----
-
-## 👥 6. Pre-Seeded Demo Accounts
-
-The application includes seven pre-configured demo accounts. You can select them directly from the login dropdown or enter their credentials:
-
-| Role | Name | Email | Password |
+| Table | Primary Key | Key Columns | Purpose |
 | :--- | :--- | :--- | :--- |
-| **Admin 1** | Administrator | `admin@assignora.demo` | `Admin@12345` |
-| **Admin 2** | Professor Admin | `professor@assignora.demo` | `Professor@123` |
-| **Student 1** | Student 1 (John Doe) | `student1@assignora.demo` | `Student@123` |
-| **Student 2** | Student 2 (Jane Smith) | `student2@assignora.demo` | `Student@123` |
-| **Student 3** | Student 3 (Alex Johnson) | `student3@assignora.demo` | `Student@123` |
-| **Student 4** | Student 4 (Sneha Rao) | `student4@assignora.demo` | `Student@123` |
-| **Student 5** | Student 5 (Rahul Sharma) | `student5@assignora.demo` | `Student@123` |
+| `users` | `id` (uuid) | `name`, `email`, `role`, `avatar`, `student_id`, `created_at` | User profiles with role flags (`admin` \| `student`) |
+| `classes` | `id` (uuid) | `name`, `subject`, `description`, `admin_id`, `created_at` | Course and classroom entities |
+| `class_members` | `id` (uuid) | `class_id`, `student_id`, `joined_at` | Student classroom enrolment registry |
+| `assignments` | `id` (uuid) | `title`, `description`, `class_id`, `admin_id`, `due_date`, `due_time`, `points`, `drive_link`, `assign_to_all`, `status` | Coursework allocations and deadlines |
+| `assignment_students` | `id` (uuid) | `assignment_id`, `student_id`, `assigned_at` | Targeted student assignment allocation mapping |
+| `submissions` | `id` (uuid) | `assignment_id`, `student_id`, `submission_link`, `comment`, `status`, `submitted_at`, `updated_at` | Student deliverable records with unique `(assignment_id, student_id)` constraint |
+| `announcements` | `id` (uuid) | `title`, `message`, `admin_id`, `class_id`, `is_published`, `created_at` | Class announcements and discussion threads |
+| `notifications` | `id` (uuid) | `user_id`, `title`, `message`, `type`, `reference_id`, `is_read`, `created_at` | User notification events with read tracking |
+
+### Row Level Security (RLS) Highlights
+- **Assignment Privacy**: Students can only query assignments allocated to their enrolled classes or assigned to them individually.
+- **Submission Confidentiality**: Students can only insert and read their own submissions. Instructors can inspect and update submissions for assignments in their owned classes.
+- **Roster Protection**: Enrolment queries verify active class membership before granting student access.
 
 ---
 
-## 🚀 7. Local Installation & Development
+## 📁 7. Project Folder Structure
+
+```
+assignora/
+├── .env.example                     # Environment configuration template
+├── .gitignore                       # Git ignore specifications
+├── index.html                       # Application entry HTML document
+├── package.json                     # NPM dependencies and scripts
+├── postcss.config.js                # PostCSS processor configuration
+├── tailwind.config.js               # Tailwind design tokens and theme extensions
+├── vercel.json                      # Vercel SPA routing configuration
+├── vite.config.js                   # Vite bundler and code-splitting rules
+├── scripts/                         # Database population and testing utilities
+│   ├── seed-academic-demo-data.js   # Class, assignment, and discussion seeder
+│   └── seed-submissions.js          # Realistic submission and grading seeder
+└── src/
+    ├── App.jsx                      # Main application component & providers
+    ├── main.jsx                     # React DOM root entry
+    ├── index.css                    # Tailwind utility and global CSS rules
+    ├── components/
+    │   ├── admin/                   # Admin modals (StudentSelectionModal)
+    │   ├── class/                   # Class modals (InviteStudent, JoinClass, StudentProfile)
+    │   ├── common/                  # Reusable UI atoms (Button, Card, Badge, Modal, Input, etc.)
+    │   ├── layout/                  # Shared shell (DashboardLayout, Header, Sidebar, MobileNav)
+    │   └── student/                 # Student modals (TwoStepSubmissionModal)
+    ├── context/
+    │   ├── AuthContext.jsx          # GoTrue authentication and profile state
+    │   └── NotificationContext.jsx  # Unread badge counters and Realtime subscription
+    ├── hooks/
+    │   └── useAuth.js               # Authentication convenience hook
+    ├── lib/
+    │   └── supabase.js              # Supabase client instantiation & URL sanitization
+    ├── pages/
+    │   ├── Login.jsx                # Universal authentication page
+    │   ├── admin/                   # Admin views (Dashboard, Classes, Assignments, Grading)
+    │   ├── shared/                  # Shared views (ClassDetail, Profile, Settings, JoinClass)
+    │   └── student/                 # Student views (Dashboard, AssignmentDetails, Submissions)
+    ├── routes/
+    │   ├── AppRoutes.jsx            # Application route definitions
+    │   ├── ProtectedRoute.jsx       # Authentication guard
+    │   └── RoleRoute.jsx            # Role verification guard (`admin` vs `student`)
+    ├── services/                    # Database and API services
+    │   ├── announcements.service.js
+    │   ├── assignments.service.js
+    │   ├── auth.service.js
+    │   ├── classes.service.js
+    │   ├── messages.service.js
+    │   ├── notifications.service.js
+    │   ├── submissions.service.js
+    │   └── users.service.js
+    └── utils/
+        └── calculations.js          # Grade letter mapping and analytics helpers
+```
+
+---
+
+## 🚀 8. Installation & Setup Instructions
 
 ### Prerequisites
-- Node.js `v18+` or `v20+` (tested on `v24.16.0`)
-- npm `v9+` (tested on `12.2.0`)
+- **Node.js**: `v18.0.0` or higher (tested on `v20.x` and `v24.x`)
+- **npm**: `v9.0.0` or higher
+- A **Supabase** project with the Assignora schema and GoTrue Auth enabled.
 
-### Setup Instructions
+### Step-by-Step Setup
+
 1. **Clone the repository:**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/DarshanDevadiga/assignora.git
    cd assignora
    ```
 
 2. **Configure Environment Variables:**
-   Copy `.env.example` to `.env`:
+   Copy the example environment file to a private `.env` file:
    ```bash
    cp .env.example .env
    ```
-   Ensure `.env` contains:
+   Open `.env` and fill in your Supabase project URL and anon public key:
    ```env
-   VITE_SUPABASE_URL=https://trkcagoxopabqerljgvn.supabase.co
-   VITE_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_anon_key_here
+   VITE_SUPABASE_URL=https://your-project-id.supabase.co
+   VITE_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_anon_key
    ```
+   > **Note:** Never commit your local `.env` file to Git. It is automatically excluded by `.gitignore`.
 
 3. **Install Dependencies:**
    ```bash
@@ -164,35 +267,60 @@ The application includes seven pre-configured demo accounts. You can select them
    ```bash
    npm run dev
    ```
-   Open `http://localhost:5173` in your browser.
+   The application will be running at `http://localhost:5173`.
 
 5. **Build for Production:**
    ```bash
    npm run build
    ```
+   The production-ready assets will be compiled into the `dist/` directory with vendor code-splitting.
+
+6. **Preview Production Build:**
+   ```bash
+   npm run preview
+   ```
 
 ---
 
-## 🌐 8. Deployment Instructions (Vercel)
+## 🌐 9. Deployment Instructions (Vercel)
 
-Assignora includes a pre-configured `vercel.json` for single-page application client routing.
+Assignora includes a pre-configured `vercel.json` ensuring single-page application client routing.
 
-### To Deploy on Vercel:
 1. Push your repository to GitHub.
-2. Go to [Vercel](https://vercel.com) and click **"Add New Project"**.
-3. Import your `assignora` repository.
-4. Set the Framework Preset to **Vite**.
-5. In the **Environment Variables** section, add:
-   - `VITE_SUPABASE_URL`: `https://trkcagoxopabqerljgvn.supabase.co`
-   - `VITE_SUPABASE_PUBLISHABLE_KEY`: *(Your Supabase publishable anon key)*
-6. Click **Deploy**. Vercel will bundle the optimized application and assign a live production URL.
+2. Sign in to [Vercel](https://vercel.com) and click **"Add New Project"**.
+3. Import your **`assignora`** repository.
+4. Set the **Framework Preset** to **Vite**.
+5. Under **Environment Variables**, provide:
+   - `VITE_SUPABASE_URL`: Your Supabase project URL
+   - `VITE_SUPABASE_PUBLISHABLE_KEY`: Your Supabase publishable/anon key
+6. Click **Deploy**. Vercel will build the application and issue a production URL.
 
 ---
 
-## 🔒 9. Security & Architecture Considerations
+## 🔮 10. Implemented vs. Planned Features
 
-- **Row Level Security (RLS)**: Enforced on all tables in Supabase Postgres. Admin 2 cannot read or modify Admin 1's classes or assignments. Students can only view coursework assigned to their classes or allocated to them directly, and cannot view or tamper with other students' submissions.
-- **Client-Side Sanitization**: `src/lib/supabase.js` validates credentials and sanitizes base URLs, stripping trailing `/rest/v1` routes automatically.
-- **Transaction Rollback Protection**: For multi-table writes (such as creating an assignment with selected students in `assignment_students`), `assignments.service.js` performs defensive rollbacks if a partial insert fails, preventing orphaned records.
-- **Strict Role Verification**: Role state is fetched directly from `public.users` in Postgres upon GoTrue token authentication, completely eliminating client-side localStorage privilege escalation.
-- **Zero Secrets in Git**: Sensitive credentials and `.env` files are strictly excluded via `.gitignore`.
+### ✅ Currently Implemented in Production
+- Full Admin/Teacher dashboard with real-time class, assignment, and completion metrics.
+- Full Student dashboard with radial donut completion charts and upcoming deadline lists.
+- Two-method student enrolment (unique class code + teacher invite modal).
+- Assignment creation with whole-class or targeted student allocation.
+- External deliverable attachment (Google Drive/GitHub/PDF) with two-step confirmation.
+- Duplicate submission prevention backed by Postgres unique constraints.
+- Teacher grading modal with scores, dynamic letter grades (`A+` to `F`), and qualitative feedback.
+- Class stream announcements and interactive discussion messages.
+- WhatsApp-style unread notification badge and per-class message counters.
+- Five complete academic demo subjects with OER educational links.
+- Production Rollup code splitting with manual chunks.
+
+### 📋 Planned Future Enhancements
+- [ ] Direct file upload integration to Supabase Storage buckets for offline deliverables.
+- [ ] Automated plagiarism detection integration via external academic API.
+- [ ] Push notifications via Web Push API for mobile and desktop browsers.
+- [ ] In-app PDF annotation viewer for grading directly inside the browser.
+- [ ] Rubric builder with multi-criterion grading matrices.
+
+---
+
+## 📄 License
+
+This project is open-source under the [MIT License](LICENSE).

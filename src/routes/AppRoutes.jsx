@@ -77,6 +77,7 @@ export default function AppRoutes({ user, loading, onLogout }) {
           <Route path="assignments" element={<AssignmentsList />} />
           <Route path="assignments/create" element={<CreateAssignment />} />
           <Route path="assignments/:id/edit" element={<CreateAssignment />} />
+          <Route path="assignments/:id" element={<SubmissionTracking />} />
           <Route path="submissions" element={<SubmissionTracking />} />
           <Route path="grades" element={<GradesGradebook />} />
           <Route path="students" element={<StudentsManagement />} />

@@ -74,7 +74,11 @@ export default function NotificationsDrawer({
     if (notif.type === 'assignment' && notif.reference_id) {
       navigate(`/${activeRole}/assignments/${notif.reference_id}`)
     } else if (notif.type === 'submission') {
-      navigate(`/${activeRole}/submissions`)
+      if (notif.reference_id) {
+        navigate(`/${activeRole}/assignments/${notif.reference_id}`)
+      } else {
+        navigate(`/${activeRole}/classes`)
+      }
     } else if (notif.type === 'announcement' && notif.reference_id) {
       navigate(`/${activeRole}/classes/${notif.reference_id}?tab=messages`)
     } else if (notif.type === 'reminder') {

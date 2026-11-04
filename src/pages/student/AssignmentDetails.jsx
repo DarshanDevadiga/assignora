@@ -17,7 +17,11 @@ import {
 import { useAuth } from '../../context/AuthContext'
 import { assignmentsService } from '../../services/assignments.service'
 import { submissionsService } from '../../services/submissions.service'
-import { formatDisplayDate, formatDeadlineBadge } from '../../utils/calculations'
+import {
+  formatDisplayDate,
+  formatDeadlineBadge,
+  calculateLetterGrade
+} from '../../utils/calculations'
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
@@ -110,6 +114,10 @@ export default function AssignmentDetails() {
 
   const deadlineBadge = formatDeadlineBadge(assignment.due_date, assignment.due_time)
   const isSubmitted = Boolean(submission)
+  const parsedSub = submission ? submissionsService.parseSubmissionComment(submission.comment) : { text: '', grade: null, feedback: '' }
+  const awardedMarks = parsedSub.grade !== null && parsedSub.grade !== undefined ? parsedSub.grade : submission?.grade
+  const isGraded = Boolean(submission && (submission.status === 'reviewed' || (awardedMarks !== null && awardedMarks !== undefined)))
+  const letterGrade = isGraded ? calculateLetterGrade(awardedMarks, assignment.points) : null
 
   return (
     <div className="space-y-6">
@@ -143,7 +151,11 @@ export default function AssignmentDetails() {
             <Badge variant="purple" size="lg">
               {assignment.points} Points
             </Badge>
-            {isSubmitted ? (
+            {isGraded ? (
+              <Badge variant="success" size="lg" dot>
+                Graded: {awardedMarks}/{assignment.points} ({letterGrade})
+              </Badge>
+            ) : isSubmitted ? (
               <Badge variant="success" size="lg" dot>
                 Submitted
               </Badge>
@@ -235,6 +247,29 @@ export default function AssignmentDetails() {
                   </p>
                 </div>
 
+                {/* Graded Score and Instructor Feedback Card */}
+                {isGraded && (
+                  <div className="p-4 rounded-xl bg-purple-50 border border-purple-200 text-purple-900 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-sm flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-brand-primary" />
+                        <span>Awarded Marks: {awardedMarks} / {assignment.points} pts</span>
+                      </span>
+                      <span className="text-xs font-black bg-purple-200 text-purple-900 px-2.5 py-0.5 rounded-full">
+                        Grade {letterGrade}
+                      </span>
+                    </div>
+                    {parsedSub.feedback && (
+                      <div className="pt-2 border-t border-purple-200/80">
+                        <span className="text-[11px] font-bold text-purple-700 block">Instructor Feedback:</span>
+                        <p className="text-xs text-purple-900 italic mt-0.5">
+                          "{parsedSub.feedback}"
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <span className="text-xs font-semibold text-brand-heading">Submission Link:</span>
                   <div className="p-3 rounded-xl bg-slate-50 border border-brand-line text-xs font-medium text-brand-primary flex items-center justify-between gap-2">
@@ -250,11 +285,11 @@ export default function AssignmentDetails() {
                   </div>
                 </div>
 
-                {submission.comment && (
+                {(parsedSub.text || submission.comment) && (
                   <div className="space-y-1">
                     <span className="text-xs font-semibold text-brand-heading">Student Notes:</span>
                     <p className="text-xs text-brand-muted bg-slate-50 p-3 rounded-xl border border-brand-line">
-                      {submission.comment}
+                      {parsedSub.text || submission.comment}
                     </p>
                   </div>
                 )}

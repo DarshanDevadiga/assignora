@@ -1,18 +1,17 @@
 import React from 'react'
 import { NavLink } from 'react-router-dom'
-import { Home, BookOpen, ClipboardList, CheckSquare, MoreHorizontal } from 'lucide-react'
+import { Home, BookOpen, ClipboardList, Users, Bell, MoreHorizontal } from 'lucide-react'
 
 export default function MobileNav({ role = 'admin', onOpenMenu }) {
   const items = role === 'admin' ? [
     { label: 'Home', path: '/admin', icon: Home, end: true },
     { label: 'Classes', path: '/admin/classes', icon: BookOpen },
     { label: 'Assignments', path: '/admin/assignments', icon: ClipboardList },
-    { label: 'Submissions', path: '/admin/submissions', icon: CheckSquare },
+    { label: 'Students', path: '/admin/students', icon: Users },
   ] : [
     { label: 'Home', path: '/student', icon: Home, end: true },
     { label: 'Classes', path: '/student/classes', icon: BookOpen },
-    { label: 'Assignments', path: '/student/assignments', icon: ClipboardList },
-    { label: 'Submissions', path: '/student/submissions', icon: CheckSquare },
+    { label: 'Announcements', path: '/student/announcements', icon: Bell },
   ]
 
   return (

@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase.js'
+import { supabase, supabaseUrl, supabaseAnonKey } from '../lib/supabase.js'
 
 const REALTIME_CHANNEL = 'assignora-realtime'
 let globalChannel = null
@@ -169,10 +169,7 @@ export const messagesService = {
     // 2. If student direct insert hits RLS on announcements, use secure admin bridge
     if (insertError) {
       const { createClient } = await import('@supabase/supabase-js')
-      const bridgeClient = createClient(
-        import.meta.env.VITE_SUPABASE_URL || 'https://trkcagoxopabqerljgvn.supabase.co',
-        import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_xjgubUfEaSOIRlDv_ysszQ_Llz9wbm_'
-      )
+      const bridgeClient = createClient(supabaseUrl, supabaseAnonKey)
       await bridgeClient.auth.signInWithPassword({
         email: 'admin@assignora.demo',
         password: 'Admin@12345',

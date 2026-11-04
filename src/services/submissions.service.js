@@ -126,7 +126,73 @@ export const submissionsService = {
   },
 
   /**
-   * Teacher Grade & Feedback for a submission
+   * Save or update teacher grade and feedback persistently in the database
+   */
+  async saveGrade({ assignmentId, studentId, grade, feedback }) {
+    if (!assignmentId || !studentId) {
+      throw new Error('Assignment ID and Student ID are required.')
+    }
+
+    const existing = await this.getStudentAssignmentSubmission(assignmentId, studentId)
+    const currentParsed = existing ? this.parseSubmissionComment(existing.comment) : { text: '' }
+
+    const combinedPayload = this.buildSubmissionComment({
+      text: currentParsed.text || '',
+      grade: Number(grade),
+      feedback: feedback?.trim() || '',
+    })
+
+    const now = new Date().toISOString()
+
+    if (existing) {
+      const { data, error } = await supabase
+        .from('submissions')
+        .update({
+          status: 'reviewed',
+          comment: combinedPayload,
+          updated_at: now,
+        })
+        .eq('id', existing.id)
+        .select(`
+          *,
+          assignments (id, title, points, class_id),
+          users:student_id (id, name, email, avatar, student_id)
+        `)
+        .single()
+
+      if (error) {
+        console.error('[submissionsService] Error updating grade:', error)
+        throw error
+      }
+      return data
+    } else {
+      const { data, error } = await supabase
+        .from('submissions')
+        .insert({
+          assignment_id: assignmentId,
+          student_id: studentId,
+          status: 'reviewed',
+          comment: combinedPayload,
+          submitted_at: now,
+          updated_at: now,
+        })
+        .select(`
+          *,
+          assignments (id, title, points, class_id),
+          users:student_id (id, name, email, avatar, student_id)
+        `)
+        .single()
+
+      if (error) {
+        console.error('[submissionsService] Error creating graded submission:', error)
+        throw error
+      }
+      return data
+    }
+  },
+
+  /**
+   * Teacher Grade & Feedback for an existing submission
    */
   async gradeSubmission(submissionId, { grade, feedback, text }) {
     const existingSub = await supabase

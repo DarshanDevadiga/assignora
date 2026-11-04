@@ -38,7 +38,13 @@ import { messagesService } from '../../services/messages.service'
 import { notificationsService } from '../../services/notifications.service'
 import { useNotifications } from '../../context/NotificationContext'
 import { supabase } from '../../lib/supabase.js'
-import { calculateCompletionRate, isOverdue, formatDisplayDate, formatDeadlineBadge } from '../../utils/calculations'
+import {
+  calculateCompletionRate,
+  isOverdue,
+  formatDisplayDate,
+  formatDeadlineBadge,
+  calculateLetterGrade
+} from '../../utils/calculations'
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
@@ -51,13 +57,10 @@ import TwoStepSubmissionModal from '../../components/student/TwoStepSubmissionMo
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: BookOpen },
-  { id: 'messages', label: 'Discussion', icon: MessageSquare },
   { id: 'assignments', label: 'Assignments', icon: ClipboardList },
-  { id: 'submissions', label: 'Submissions', icon: CheckSquare },
-  { id: 'grades', label: 'Scores & Grades', icon: BarChart2 },
-  { id: 'resources', label: 'Resources', icon: FolderOpen },
-  { id: 'history', label: 'Activity History', icon: History },
   { id: 'people', label: 'People', icon: Users },
+  { id: 'messages', label: 'Messages', icon: MessageSquare },
+  { id: 'resources', label: 'Resources', icon: FolderOpen },
 ]
 
 export default function ClassDetailPage() {
@@ -750,13 +753,9 @@ export default function ClassDetailPage() {
                   <History className="w-3.5 h-3.5 text-brand-primary" />
                   <span>Recent Class Activity</span>
                 </h3>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('history')}
-                  className="text-xs font-semibold text-brand-primary hover:underline"
-                >
-                  View All
-                </button>
+                <span className="text-[11px] font-semibold text-brand-muted">
+                  Latest updates
+                </span>
               </div>
 
               {activities.length > 0 ? (
@@ -932,80 +931,224 @@ export default function ClassDetailPage() {
           </div>
 
           {assignments.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {assignments.map((assignment) => {
                 const deadlineBadge = formatDeadlineBadge(assignment.due_date, assignment.due_time)
+                const isPastDue = isOverdue(assignment.due_date, assignment.due_time)
+
+                // Submission calculations for this assignment
+                const assignmentSubs = submissions.filter((s) => s.assignment_id === assignment.id)
+                const totalEnrolled = members.length
+                const submittedCount = assignmentSubs.length
+                const pendingCount = Math.max(0, totalEnrolled - submittedCount)
+                const gradedSubs = assignmentSubs.filter((s) => s.grade !== null && s.grade !== undefined)
+                const gradedCount = gradedSubs.length
+                const awaitingGradingCount = Math.max(0, submittedCount - gradedCount)
+
+                // For student view
                 const mySub = mySubmissions.find((s) => s.assignment_id === assignment.id)
                 const isSubmitted = Boolean(mySub)
+                const isGraded = isSubmitted && mySub.grade !== null && mySub.grade !== undefined
+                const letterGrade = isGraded ? calculateLetterGrade(mySub.grade, assignment.points) : null
 
                 return (
                   <Card
                     key={assignment.id}
-                    padding="p-5"
+                    padding="p-5 sm:p-6"
                     className="space-y-4 shadow-card hover:border-brand-border transition-all flex flex-col justify-between"
                   >
-                    <div className="space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <h4 className="font-bold text-base text-brand-heading line-clamp-1">
-                          {assignment.title}
-                        </h4>
-                        <span className="text-xs font-bold text-brand-primary bg-brand-light px-2.5 py-0.5 rounded-full shrink-0">
-                          {assignment.points} pts
-                        </span>
+                    <div className="space-y-3">
+                      {/* Top Badges & Status */}
+                      <div className="flex items-start justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold text-brand-primary bg-brand-light px-2.5 py-0.5 rounded-full shrink-0">
+                            {assignment.points} pts
+                          </span>
+                          {isPastDue ? (
+                            <Badge variant="danger" size="sm">
+                              Past Due
+                            </Badge>
+                          ) : (
+                            <Badge variant="success" size="sm">
+                              Active
+                            </Badge>
+                          )}
+                          {deadlineBadge && (
+                            <Badge variant={deadlineBadge.variant} size="sm">
+                              {deadlineBadge.text}
+                            </Badge>
+                          )}
+                        </div>
+
+                        {/* Student submission indicator badge */}
+                        {!isTeacher && (
+                          isGraded ? (
+                            <Badge variant="success" size="sm" dot>
+                              Graded: {mySub.grade}/{assignment.points} ({letterGrade})
+                            </Badge>
+                          ) : isSubmitted ? (
+                            <Badge variant="primary" size="sm" dot>
+                              Submitted
+                            </Badge>
+                          ) : (
+                            <Badge variant={isPastDue ? 'danger' : 'warning'} size="sm" dot>
+                              {isPastDue ? 'Missing' : 'Not Submitted'}
+                            </Badge>
+                          )
+                        )}
                       </div>
 
-                      <p className="text-xs text-brand-body line-clamp-2 leading-relaxed">
-                        {assignment.description || 'No description provided.'}
-                      </p>
+                      {/* Assignment Title & Description */}
+                      <div>
+                        <h4 className="font-bold text-base text-brand-heading leading-snug">
+                          {assignment.title}
+                        </h4>
+                        <p className="text-xs text-brand-body line-clamp-2 mt-1 leading-relaxed">
+                          {assignment.description || 'No description provided.'}
+                        </p>
+                      </div>
 
-                      {assignment.drive_link && (
-                        <div className="pt-1">
-                          <a
-                            href={assignment.drive_link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 text-xs text-brand-primary hover:underline font-medium"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                            <span>Resource Attachment Link</span>
-                          </a>
+                      {/* Dates and Attachment Metadata */}
+                      <div className="space-y-1.5 pt-1 text-xs text-brand-muted">
+                        <div className="flex items-center gap-4 flex-wrap">
+                          {assignment.created_at && (
+                            <span className="flex items-center gap-1.5">
+                              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                              <span>Created: {formatDisplayDate(assignment.created_at)}</span>
+                            </span>
+                          )}
+                          <span className="flex items-center gap-1.5 font-medium text-brand-heading">
+                            <Clock className="w-3.5 h-3.5 text-slate-400" />
+                            <span>
+                              Due: {assignment.due_date ? `${formatDisplayDate(assignment.due_date)} at ${assignment.due_time?.substring(0, 5) || '23:59'}` : 'No deadline'}
+                            </span>
+                          </span>
+                        </div>
+
+                        {/* Attachment info */}
+                        <div className="pt-0.5">
+                          {assignment.drive_link ? (
+                            <a
+                              href={assignment.drive_link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 text-xs text-brand-primary font-semibold hover:underline"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                              <span>Reference Attachment (Drive)</span>
+                            </a>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 italic">No attachments attached</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Teacher Submission Stats Counters */}
+                      {isTeacher && (
+                        <div className="grid grid-cols-5 gap-2 pt-2 border-t border-brand-line/60 text-center">
+                          <div className="p-2 rounded-xl bg-slate-50 border border-brand-line/60">
+                            <span className="text-[10px] text-brand-muted block font-medium">Enrolled</span>
+                            <span className="text-sm font-bold text-brand-heading">{totalEnrolled}</span>
+                          </div>
+                          <div className="p-2 rounded-xl bg-emerald-50/60 border border-emerald-100">
+                            <span className="text-[10px] text-emerald-700 block font-medium">Submitted</span>
+                            <span className="text-sm font-bold text-emerald-700">{submittedCount}</span>
+                          </div>
+                          <div className="p-2 rounded-xl bg-amber-50/60 border border-amber-100">
+                            <span className="text-[10px] text-amber-700 block font-medium">Pending</span>
+                            <span className="text-sm font-bold text-amber-700">{pendingCount}</span>
+                          </div>
+                          <div className="p-2 rounded-xl bg-purple-50/60 border border-purple-100">
+                            <span className="text-[10px] text-purple-700 block font-medium">Graded</span>
+                            <span className="text-sm font-bold text-purple-700">{gradedCount}</span>
+                          </div>
+                          <div className="p-2 rounded-xl bg-rose-50/60 border border-rose-100">
+                            <span className="text-[10px] text-rose-700 block font-medium">Awaiting</span>
+                            <span className="text-sm font-bold text-rose-700">{awaitingGradingCount}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Student Graded Feedback Panel */}
+                      {!isTeacher && mySub && (
+                        <div className="rounded-xl p-3 bg-slate-50 border border-brand-line space-y-2 text-xs">
+                          <div className="flex items-center justify-between">
+                            <span className="text-brand-muted">
+                              Submitted on {formatDisplayDate(mySub.submitted_at)}
+                            </span>
+                            {mySub.submission_link && (
+                              <a
+                                href={mySub.submission_link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-brand-primary font-semibold hover:underline"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                                <span>View Work</span>
+                              </a>
+                            )}
+                          </div>
+
+                          {isGraded ? (
+                            <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 space-y-1">
+                              <div className="flex items-center justify-between font-bold">
+                                <span className="flex items-center gap-1.5">
+                                  <Award className="w-4 h-4 text-emerald-600" />
+                                  <span>Marks: {mySub.grade} / {assignment.points} pts</span>
+                                </span>
+                                <span className="text-xs bg-emerald-200/80 text-emerald-900 px-2 py-0.5 rounded-full font-black">
+                                  Grade {letterGrade}
+                                </span>
+                              </div>
+                              {mySub.feedback && (
+                                <p className="text-[11px] text-emerald-800 pt-1 border-t border-emerald-200/60">
+                                  <strong>Feedback:</strong> "{mySub.feedback}"
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[11px]">
+                              ⏳ Submission received. Your instructor has not evaluated this deliverable yet.
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
 
-                    <div className="pt-3 border-t border-brand-line/60 flex items-center justify-between text-xs">
-                      <div className="space-y-0.5">
-                        <span className="text-brand-muted block text-[11px]">Due Date:</span>
-                        <strong className="text-brand-heading">
-                          {assignment.due_date ? `${formatDisplayDate(assignment.due_date)} at ${assignment.due_time?.substring(0, 5) || '23:59'}` : 'No deadline'}
-                        </strong>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {isTeacher ? (
+                    {/* Footer Actions */}
+                    <div className="pt-3 border-t border-brand-line/60 flex items-center justify-end">
+                      {isTeacher ? (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          icon={Eye}
+                          onClick={() => navigate(`/admin/assignments/${assignment.id}`)}
+                          className="shadow-purple-glow font-semibold"
+                        >
+                          View Submissions
+                        </Button>
+                      ) : isSubmitted ? (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-brand-muted">Deliverable locked</span>
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => setActiveTab('submissions')}
+                            onClick={() => navigate(`/student/assignments/${assignment.id}`)}
                           >
-                            Track Submissions
+                            View Details
                           </Button>
-                        ) : isSubmitted ? (
-                          <Badge variant="success" size="sm" dot>
-                            Submitted
-                          </Badge>
-                        ) : (
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            icon={Send}
-                            className="shadow-purple-glow font-semibold"
-                            onClick={() => setSubmittingAssignment(assignment)}
-                          >
-                            Submit
-                          </Button>
-                        )}
-                      </div>
+                        </div>
+                      ) : (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          icon={Send}
+                          className="shadow-purple-glow font-semibold"
+                          onClick={() => setSubmittingAssignment(assignment)}
+                        >
+                          Submit Work
+                        </Button>
+                      )}
                     </div>
                   </Card>
                 )
@@ -1037,399 +1180,7 @@ export default function ClassDetailPage() {
       )}
 
       {/* =========================================================================
-          TAB 3: SUBMISSIONS (Teacher Grade Controls & Student Submission View)
-      ========================================================================= */}
-      {activeTab === 'submissions' && (
-        <div className="space-y-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-base font-bold text-brand-heading">
-                {isTeacher ? 'Class Submission Tracker' : 'My Course Submissions'}
-              </h3>
-              <p className="text-xs text-brand-muted">
-                {isTeacher
-                  ? 'Review deliverable links, inspect student notes, and enter grades and feedback'
-                  : 'Track your submitted work, review grades, and read instructor feedback'}
-              </p>
-            </div>
-          </div>
-
-          {/* TEACHER SUBMISSIONS TABLE */}
-          {isTeacher && (
-            submissions.length > 0 ? (
-              <div className="bg-white rounded-2xl border border-brand-line shadow-card overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-brand-muted uppercase font-semibold text-[11px] border-b border-brand-line">
-                      <tr>
-                        <th className="px-5 py-3.5">Student</th>
-                        <th className="px-5 py-3.5">Assignment</th>
-                        <th className="px-5 py-3.5">Deliverable</th>
-                        <th className="px-5 py-3.5">Submitted At</th>
-                        <th className="px-5 py-3.5">Status</th>
-                        <th className="px-5 py-3.5">Score / Grade</th>
-                        <th className="px-5 py-3.5 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-brand-line/60">
-                      {submissions.map((sub) => {
-                        const isGraded = sub.status === 'reviewed' && sub.grade !== null
-
-                        return (
-                          <tr key={sub.id} className="hover:bg-slate-50/60 transition-colors">
-                            <td className="px-5 py-4">
-                              <div className="flex items-center gap-2.5">
-                                <div className="w-8 h-8 rounded-full bg-brand-light text-brand-primary flex items-center justify-center font-bold">
-                                  {sub.users?.name?.charAt(0) || 'S'}
-                                </div>
-                                <div>
-                                  <span className="font-bold text-brand-heading block">{sub.users?.name || 'Student'}</span>
-                                  <span className="text-[11px] text-brand-muted">{sub.users?.email}</span>
-                                </div>
-                              </div>
-                            </td>
-
-                            <td className="px-5 py-4 font-semibold text-brand-heading">
-                              {sub.assignments?.title || 'Assignment'}
-                            </td>
-
-                            <td className="px-5 py-4">
-                              {sub.submission_link ? (
-                                <a
-                                  href={sub.submission_link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1 text-brand-primary font-medium hover:underline"
-                                >
-                                  <ExternalLink className="w-3.5 h-3.5" />
-                                  <span>View Work</span>
-                                </a>
-                              ) : (
-                                <span className="text-slate-400">No link</span>
-                              )}
-                            </td>
-
-                            <td className="px-5 py-4 text-brand-muted">
-                              {formatDisplayDate(sub.submitted_at)}
-                            </td>
-
-                            <td className="px-5 py-4">
-                              <Badge
-                                variant={isGraded ? 'success' : 'primary'}
-                                size="sm"
-                              >
-                                {isGraded ? 'Graded & Reviewed' : 'Submitted'}
-                              </Badge>
-                            </td>
-
-                            <td className="px-5 py-4">
-                              {isGraded ? (
-                                <div>
-                                  <span className="font-bold text-emerald-700">
-                                    {sub.grade} / {sub.assignments?.points || 100} pts
-                                  </span>
-                                  {sub.feedback && (
-                                    <p className="text-[11px] text-brand-muted truncate max-w-[150px]" title={sub.feedback}>
-                                      "{sub.feedback}"
-                                    </p>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-slate-400 italic">Not graded</span>
-                              )}
-                            </td>
-
-                            <td className="px-5 py-4 text-right">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                icon={Award}
-                                onClick={() => {
-                                  setGradingSubmission(sub)
-                                  setGradeScore(sub.grade !== null && sub.grade !== undefined ? String(sub.grade) : '')
-                                  setGradeFeedback(sub.feedback || '')
-                                }}
-                              >
-                                {isGraded ? 'Edit Grade' : 'Grade & Feedback'}
-                              </Button>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : (
-              <Card className="text-center py-14 space-y-3">
-                <CheckSquare className="w-12 h-12 text-slate-300 mx-auto" />
-                <h4 className="text-sm font-bold text-brand-heading">No submissions yet</h4>
-                <p className="text-xs text-brand-muted max-w-sm mx-auto">
-                  Enrolled students have not submitted work for any assignments in this class yet.
-                </p>
-              </Card>
-            )
-          )}
-
-          {/* STUDENT SUBMISSIONS VIEW */}
-          {!isTeacher && (
-            assignments.length > 0 ? (
-              <div className="space-y-4">
-                {assignments.map((assignment) => {
-                  const sub = mySubmissions.find((s) => s.assignment_id === assignment.id)
-                  const isSubmitted = Boolean(sub)
-                  const isGraded = sub?.status === 'reviewed' && sub?.grade !== null
-
-                  return (
-                    <Card key={assignment.id} padding="p-5" className="space-y-4 shadow-card">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-base font-bold text-brand-heading">{assignment.title}</h4>
-                            <span className="text-xs font-semibold text-brand-primary bg-brand-light px-2 py-0.5 rounded-full">
-                              {assignment.points} pts
-                            </span>
-                          </div>
-                          <p className="text-xs text-brand-muted mt-0.5">
-                            Due: {assignment.due_date ? `${formatDisplayDate(assignment.due_date)} at ${assignment.due_time?.substring(0, 5) || '23:59'}` : 'No deadline'}
-                          </p>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          {isSubmitted ? (
-                            <Badge variant={isGraded ? 'success' : 'primary'} size="sm" dot>
-                              {isGraded ? 'Graded' : 'Submitted'}
-                            </Badge>
-                          ) : (
-                            <Button
-                              variant="primary"
-                              size="sm"
-                              icon={Send}
-                              className="shadow-purple-glow font-semibold"
-                              onClick={() => setSubmittingAssignment(assignment)}
-                            >
-                              Submit Assignment
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Submission Details Card if submitted */}
-                      {sub && (
-                        <div className="rounded-xl p-4 bg-slate-50 border border-brand-line space-y-3 text-xs">
-                          <div className="flex items-center justify-between flex-wrap gap-2">
-                            <div>
-                              <span className="text-[11px] text-brand-muted block">Submitted on:</span>
-                              <strong className="text-brand-heading">{formatDisplayDate(sub.submitted_at)}</strong>
-                            </div>
-                            {sub.submission_link && (
-                              <a
-                                href={sub.submission_link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 text-brand-primary font-semibold hover:underline"
-                              >
-                                <ExternalLink className="w-3.5 h-3.5" />
-                                <span>Inspect Submitted Link</span>
-                              </a>
-                            )}
-                          </div>
-
-                          {/* Grade & Feedback Highlight */}
-                          {isGraded ? (
-                            <div className="rounded-lg p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 space-y-1">
-                              <div className="flex items-center justify-between">
-                                <span className="font-bold flex items-center gap-1.5">
-                                  <Award className="w-4 h-4 text-emerald-600" />
-                                  <span>Grade Awarded: {sub.grade} / {assignment.points} pts</span>
-                                </span>
-                                <span className="font-black text-sm">
-                                  {Math.round((sub.grade / (assignment.points || 100)) * 100)}%
-                                </span>
-                              </div>
-                              {sub.feedback && (
-                                <p className="text-xs text-emerald-800 pt-1 border-t border-emerald-200/60">
-                                  <strong>Teacher Feedback:</strong> "{sub.feedback}"
-                                </p>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[11px]">
-                              ⏳ Submission received. Your instructor has not graded this deliverable yet.
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </Card>
-                  )
-                })}
-              </div>
-            ) : (
-              <Card className="text-center py-12 space-y-2">
-                <p className="text-xs text-brand-muted">No assignments found for this class.</p>
-              </Card>
-            )
-          )}
-        </div>
-      )}
-
-      {/* =========================================================================
-          TAB 4: SCORES AND GRADES
-      ========================================================================= */}
-      {activeTab === 'grades' && (
-        <div className="space-y-5">
-          <div>
-            <h3 className="text-base font-bold text-brand-heading">
-              {isTeacher ? 'Class Gradebook' : 'My Grades & Performance'}
-            </h3>
-            <p className="text-xs text-brand-muted">
-              Summary of total marks, individual assignments, and instructor comments
-            </p>
-          </div>
-
-          {/* Teacher Grade Matrix */}
-          {isTeacher ? (
-            members.length > 0 ? (
-              <div className="bg-white rounded-2xl border border-brand-line shadow-card overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-brand-muted uppercase font-semibold text-[11px] border-b border-brand-line">
-                      <tr>
-                        <th className="px-5 py-3.5">Student</th>
-                        <th className="px-5 py-3.5">Assignments Submitted</th>
-                        <th className="px-5 py-3.5">Graded Count</th>
-                        <th className="px-5 py-3.5">Total Points</th>
-                        <th className="px-5 py-3.5">Average %</th>
-                        <th className="px-5 py-3.5 text-right">Performance</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-brand-line/60">
-                      {members.map((member) => {
-                        const studentSubs = submissions.filter((s) => s.student_id === member.student_id)
-                        const gradedSubs = studentSubs.filter((s) => s.status === 'reviewed' && s.grade !== null)
-                        const totalScore = gradedSubs.reduce((acc, curr) => acc + (curr.grade || 0), 0)
-                        const totalPossible = gradedSubs.reduce((acc, curr) => acc + (curr.assignments?.points || 100), 0)
-                        const pct = totalPossible > 0 ? Math.round((totalScore / totalPossible) * 100) : 0
-
-                        return (
-                          <tr key={member.id} className="hover:bg-slate-50/60">
-                            <td className="px-5 py-4">
-                              <div className="flex items-center gap-2.5">
-                                <div className="w-8 h-8 rounded-full bg-brand-light text-brand-primary flex items-center justify-center font-bold">
-                                  {member.users?.name?.charAt(0) || 'S'}
-                                </div>
-                                <div>
-                                  <strong className="text-brand-heading block">{member.users?.name || 'Student'}</strong>
-                                  <span className="text-[11px] text-brand-muted">{member.users?.email}</span>
-                                </div>
-                              </div>
-                            </td>
-
-                            <td className="px-5 py-4 font-semibold text-brand-heading">
-                              {studentSubs.length} / {assignments.length}
-                            </td>
-
-                            <td className="px-5 py-4 text-brand-muted">
-                              {gradedSubs.length} Graded
-                            </td>
-
-                            <td className="px-5 py-4 font-bold text-brand-primary">
-                              {totalScore} pts
-                            </td>
-
-                            <td className="px-5 py-4 font-bold text-brand-heading">
-                              {pct}%
-                            </td>
-
-                            <td className="px-5 py-4 text-right">
-                              <Badge
-                                variant={pct >= 85 ? 'success' : pct >= 70 ? 'primary' : 'warning'}
-                                size="sm"
-                              >
-                                {pct >= 85 ? 'Excellent (A)' : pct >= 70 ? 'Good (B)' : 'Passing (C)'}
-                              </Badge>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : (
-              <Card className="text-center py-12 space-y-2">
-                <p className="text-xs text-brand-muted">No students enrolled to calculate grades.</p>
-              </Card>
-            )
-          ) : (
-            /* Student Personal Scores View */
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Card padding="p-4" className="shadow-card">
-                  <span className="text-[11px] text-brand-muted block">Assignments Completed</span>
-                  <strong className="text-xl font-black text-brand-heading mt-1 block">
-                    {mySubmissions.length} / {assignments.length}
-                  </strong>
-                </Card>
-                <Card padding="p-4" className="shadow-card">
-                  <span className="text-[11px] text-brand-muted block">Total Points Earned</span>
-                  <strong className="text-xl font-black text-brand-primary mt-1 block">
-                    {mySubmissions.reduce((acc, curr) => acc + (curr.grade || 0), 0)} pts
-                  </strong>
-                </Card>
-                <Card padding="p-4" className="shadow-card">
-                  <span className="text-[11px] text-brand-muted block">Course Status</span>
-                  <strong className="text-xl font-black text-emerald-600 mt-1 block">
-                    Active Scholar
-                  </strong>
-                </Card>
-              </div>
-
-              {/* Assignments breakdown table */}
-              <div className="bg-white rounded-2xl border border-brand-line shadow-card overflow-hidden">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-brand-muted uppercase font-semibold text-[11px] border-b border-brand-line">
-                    <tr>
-                      <th className="px-5 py-3.5">Assignment</th>
-                      <th className="px-5 py-3.5">Points Possible</th>
-                      <th className="px-5 py-3.5">Score Awarded</th>
-                      <th className="px-5 py-3.5">Status</th>
-                      <th className="px-5 py-3.5">Teacher Feedback</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-brand-line/60">
-                    {assignments.map((a) => {
-                      const sub = mySubmissions.find((s) => s.assignment_id === a.id)
-                      const isGraded = sub?.status === 'reviewed' && sub?.grade !== null
-
-                      return (
-                        <tr key={a.id} className="hover:bg-slate-50/60">
-                          <td className="px-5 py-4 font-bold text-brand-heading">{a.title}</td>
-                          <td className="px-5 py-4 text-brand-muted">{a.points} pts</td>
-                          <td className="px-5 py-4 font-bold text-emerald-700">
-                            {isGraded ? `${sub.grade} pts` : sub ? 'Pending Review' : '—'}
-                          </td>
-                          <td className="px-5 py-4">
-                            <Badge variant={isGraded ? 'success' : sub ? 'primary' : 'danger'} size="sm">
-                              {isGraded ? 'Graded' : sub ? 'Submitted' : 'Missing'}
-                            </Badge>
-                          </td>
-                          <td className="px-5 py-4 text-brand-muted italic">
-                            {sub?.feedback ? `"${sub.feedback}"` : '—'}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* =========================================================================
-          TAB 5: RESOURCES
+          TAB 3: RESOURCES
       ========================================================================= */}
       {activeTab === 'resources' && (
         <div className="space-y-5">
@@ -1470,12 +1221,17 @@ export default function ClassDetailPage() {
 
                 <div>
                   <h4 className="font-bold text-sm text-brand-heading line-clamp-1">{res.title}</h4>
-                  <span className="text-[11px] text-brand-muted mt-0.5 block">
-                    Added: {formatDisplayDate(res.addedAt)}
+                  {res.description && (
+                    <p className="text-xs text-brand-muted line-clamp-2 mt-1 leading-relaxed">
+                      {res.description}
+                    </p>
+                  )}
+                  <span className="text-[11px] text-brand-muted mt-1 block">
+                    Added: {formatDisplayDate(res.addedAt)} {res.addedBy ? `• ${res.addedBy}` : ''}
                   </span>
                 </div>
 
-                <div className="pt-2 border-t border-brand-line/60">
+                <div className="pt-2 border-t border-brand-line/60 flex items-center justify-between">
                   {res.url && res.url !== '#' ? (
                     <a
                       href={res.url}
@@ -1484,62 +1240,18 @@ export default function ClassDetailPage() {
                       className="inline-flex items-center gap-1.5 text-xs text-brand-primary font-semibold hover:underline"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
-                      <span>Open Document</span>
+                      <span>{res.type ? `Open ${res.type}` : 'Open Resource'}</span>
                     </a>
                   ) : (
                     <span className="text-xs text-brand-muted italic">Archived in Classroom</span>
                   )}
+                  <span className="text-[10px] text-slate-400 font-medium uppercase">
+                    {res.type || 'Link'}
+                  </span>
                 </div>
               </Card>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* =========================================================================
-          TAB 6: ACTIVITY HISTORY (Chronological Audit Trail)
-      ========================================================================= */}
-      {activeTab === 'history' && (
-        <div className="space-y-5">
-          <div>
-            <h3 className="text-base font-bold text-brand-heading">
-              Class Activity History
-            </h3>
-            <p className="text-xs text-brand-muted">
-              Audit log of assignments, submissions, gradings, announcements and student enrolments
-            </p>
-          </div>
-
-          {activities.length > 0 ? (
-            <div className="relative pl-6 space-y-6 before:absolute before:left-2.5 before:top-3 before:bottom-3 before:w-0.5 before:bg-brand-line">
-              {activities.map((act) => (
-                <div key={act.id} className="relative flex items-start gap-4">
-                  <div className="absolute -left-6 top-1 w-5 h-5 rounded-full bg-brand-primary ring-4 ring-white flex items-center justify-center text-white text-[10px]">
-                    •
-                  </div>
-
-                  <Card padding="p-4" className="flex-1 shadow-card space-y-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <h4 className="text-xs font-bold text-brand-heading">{act.title}</h4>
-                      <span className="text-[10px] text-brand-muted shrink-0">
-                        {formatDisplayDate(act.timestamp)}
-                      </span>
-                    </div>
-                    {act.user && (
-                      <p className="text-[11px] text-brand-muted">
-                        Associated user: {act.user.name} ({act.user.email})
-                      </p>
-                    )}
-                  </Card>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <Card className="text-center py-12 space-y-2">
-              <History className="w-10 h-10 text-slate-300 mx-auto" />
-              <p className="text-xs text-brand-muted">No activity has been recorded yet.</p>
-            </Card>
-          )}
         </div>
       )}
 

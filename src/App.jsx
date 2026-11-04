@@ -1,6 +1,7 @@
 import React from 'react'
 import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { NotificationProvider } from './context/NotificationContext'
 import AppRoutes from './routes/AppRoutes'
 
 function MainApp() {
@@ -19,7 +20,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <MainApp />
+        <NotificationProvider>
+          <MainApp />
+        </NotificationProvider>
       </AuthProvider>
     </BrowserRouter>
   )

@@ -28,6 +28,8 @@ import Modal from '../../components/common/Modal'
 import { Input, Textarea } from '../../components/common/Input'
 import InviteStudentModal from '../../components/class/InviteStudentModal'
 import JoinClassModal from '../../components/class/JoinClassModal'
+import NotificationBadge from '../../components/common/NotificationBadge'
+import { useNotifications } from '../../context/NotificationContext'
 
 const THEMES = [
   {
@@ -54,6 +56,7 @@ const THEMES = [
 
 export default function ClassesManagement() {
   const { user } = useAuth()
+  const { classUnreadCounts = {} } = useNotifications()
   const navigate = useNavigate()
 
   const [classes, setClasses] = useState([])
@@ -273,9 +276,17 @@ export default function ClassesManagement() {
                         <ThemeIcon className="w-6 h-6 text-white" />
                       </div>
                       <div className="min-w-0">
-                        <h3 className="font-bold text-lg sm:text-xl text-white truncate group-hover:underline">
-                          {cls.name}
-                        </h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-bold text-lg sm:text-xl text-white truncate group-hover:underline">
+                            {cls.name}
+                          </h3>
+                          {classUnreadCounts[cls.id] > 0 && (
+                            <NotificationBadge
+                              count={classUnreadCounts[cls.id]}
+                              className="shadow-md"
+                            />
+                          )}
+                        </div>
                         <p className="text-xs text-white/80 font-medium truncate mt-0.5">
                           {cls.subject || 'Course'}
                         </p>

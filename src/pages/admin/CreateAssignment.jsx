@@ -25,6 +25,7 @@ import {
 import { useAuth } from '../../context/AuthContext'
 import { classesService } from '../../services/classes.service'
 import { assignmentsService } from '../../services/assignments.service'
+import { notificationsService } from '../../services/notifications.service'
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
@@ -163,10 +164,20 @@ export default function CreateAssignment() {
           assignToAll ? [] : selectedStudentIds
         )
       } else {
-        await assignmentsService.createAssignment(
+        const createdAssn = await assignmentsService.createAssignment(
           payload,
           assignToAll ? [] : selectedStudentIds
         )
+
+        // Notify enrolled students in real-time
+        await notificationsService.notifyClassMembers({
+          classId: selectedClassId,
+          excludeUserId: user.id,
+          title: `New Assignment in ${currentClass?.name || 'Class'}`,
+          message: `"${title.trim()}" has been assigned (${Number(points) || 100} pts).`,
+          type: 'assignment',
+          referenceId: createdAssn?.id,
+        })
       }
 
       navigate('/admin/assignments')

@@ -26,9 +26,12 @@ import StatCard from '../../components/common/StatCard'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
 import JoinClassModal from '../../components/class/JoinClassModal'
+import NotificationBadge from '../../components/common/NotificationBadge'
+import { useNotifications } from '../../context/NotificationContext'
 
 export default function StudentDashboard() {
   const { user } = useAuth()
+  const { classUnreadCounts = {} } = useNotifications()
   const navigate = useNavigate()
 
   const [classes, setClasses] = useState([])
@@ -229,9 +232,14 @@ export default function StudentDashboard() {
                 className="group p-5 rounded-2xl bg-white border border-brand-line hover:border-brand-primary/60 shadow-card hover:shadow-card-hover transition-all cursor-pointer flex flex-col justify-between space-y-3"
               >
                 <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-brand-primary bg-brand-light px-2.5 py-0.5 rounded-full inline-block">
-                    {cls.subject || 'Course'}
-                  </span>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-brand-primary bg-brand-light px-2.5 py-0.5 rounded-full inline-block">
+                      {cls.subject || 'Course'}
+                    </span>
+                    {classUnreadCounts[cls.id] > 0 && (
+                      <NotificationBadge count={classUnreadCounts[cls.id]} />
+                    )}
+                  </div>
                   <h3 className="font-bold text-base text-brand-heading mt-2 group-hover:text-brand-primary transition-colors line-clamp-1">
                     {cls.name}
                   </h3>

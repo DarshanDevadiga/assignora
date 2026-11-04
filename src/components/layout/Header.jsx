@@ -13,6 +13,7 @@ import {
   GraduationCap
 } from 'lucide-react'
 import SearchInput from '../common/SearchInput'
+import NotificationBadge from '../common/NotificationBadge'
 
 export default function Header({
   user,
@@ -88,17 +89,18 @@ export default function Header({
           <Grid className="w-5 h-5" />
         </button>
 
-        {/* Notification Bell */}
+        {/* Notification Bell with WhatsApp-style Badge */}
         <button
           type="button"
           onClick={onOpenNotifications}
-          title="Notifications"
+          title={unreadNotifications > 0 ? `${unreadNotifications} unread notifications` : 'Notifications'}
           className="relative p-2 text-brand-muted hover:text-brand-heading hover:bg-slate-100 rounded-full transition-colors cursor-pointer"
         >
           <Bell className="w-5 h-5" />
-          {unreadNotifications > 0 && (
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-brand-danger ring-2 ring-white" />
-          )}
+          <NotificationBadge
+            count={unreadNotifications}
+            className="absolute -top-1 -right-1"
+          />
         </button>
 
         {/* User Profile dropdown */}

@@ -15,8 +15,15 @@ import {
   User,
   X
 } from 'lucide-react'
+import NotificationBadge from '../common/NotificationBadge'
 
-export default function Sidebar({ role = 'admin', isOpen = false, onClose }) {
+export default function Sidebar({
+  role = 'admin',
+  isOpen = false,
+  onClose,
+  unreadClassesCount = 0,
+  unreadNotificationsCount = 0,
+}) {
   const location = useLocation()
 
   const adminNav = [
@@ -60,6 +67,14 @@ export default function Sidebar({ role = 'admin', isOpen = false, onClose }) {
           ? location.pathname === item.path
           : location.pathname.startsWith(item.path)
 
+        const isClassesNav = item.name === 'My Classes'
+        const isAnnouncementsNav = item.name === 'Announcements'
+        const badgeCount = isClassesNav
+          ? unreadClassesCount
+          : isAnnouncementsNav
+          ? unreadNotificationsCount
+          : 0
+
         return (
           <li key={item.name}>
             <NavLink
@@ -77,7 +92,10 @@ export default function Sidebar({ role = 'admin', isOpen = false, onClose }) {
                   isActive ? 'text-brand-primary' : 'text-slate-400'
                 }`}
               />
-              <span>{item.name}</span>
+              <span className="flex-1 truncate">{item.name}</span>
+              {badgeCount > 0 && (
+                <NotificationBadge count={badgeCount} className="ml-auto" />
+              )}
             </NavLink>
           </li>
         )

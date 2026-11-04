@@ -1,32 +1,24 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import Header from './Header'
 import MobileNav from './MobileNav'
 import NotificationsDrawer from '../common/NotificationsDrawer'
-import { notificationsService } from '../../services/notifications.service'
+import { useNotifications } from '../../context/NotificationContext'
 
 export default function DashboardLayout({ user, role = 'admin', onLogout }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const [notifications, setNotifications] = useState([])
   const navigate = useNavigate()
 
-  useEffect(() => {
-    loadNotifications()
-  }, [user?.id])
-
-  async function loadNotifications() {
-    if (!user?.id) return
-    try {
-      const data = await notificationsService.getUserNotifications(user.id)
-      setNotifications(data)
-    } catch (err) {
-      console.warn('Could not load notifications:', err)
-    }
-  }
-
-  const unreadCount = notifications.filter((n) => !n.is_read).length
+  const {
+    notifications,
+    unreadNotificationsCount,
+    totalClassUnreadCount,
+    markNotificationAsRead,
+    markAllNotificationsAsRead,
+    refreshNotifications,
+  } = useNotifications()
 
   return (
     <div className="min-h-screen bg-brand-bg flex">
@@ -35,6 +27,8 @@ export default function DashboardLayout({ user, role = 'admin', onLogout }) {
         role={role}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        unreadClassesCount={totalClassUnreadCount}
+        unreadNotificationsCount={unreadNotificationsCount}
       />
 
       {/* Main Content Area */}
@@ -43,7 +37,7 @@ export default function DashboardLayout({ user, role = 'admin', onLogout }) {
         <Header
           user={user}
           role={role}
-          unreadNotifications={unreadCount}
+          unreadNotifications={unreadNotificationsCount}
           onOpenMobileSidebar={() => setSidebarOpen(true)}
           onOpenNotifications={() => setNotificationsOpen(true)}
           onLogout={onLogout}
@@ -59,6 +53,7 @@ export default function DashboardLayout({ user, role = 'admin', onLogout }) {
         <MobileNav
           role={role}
           onOpenMenu={() => setSidebarOpen(true)}
+          unreadNotifications={unreadNotificationsCount}
         />
 
         {/* Real-time Notifications Drawer */}
@@ -67,7 +62,7 @@ export default function DashboardLayout({ user, role = 'admin', onLogout }) {
           onClose={() => setNotificationsOpen(false)}
           notifications={notifications}
           userId={user?.id}
-          onRefresh={loadNotifications}
+          onRefresh={refreshNotifications}
         />
       </div>
     </div>

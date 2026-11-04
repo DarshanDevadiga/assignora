@@ -27,24 +27,30 @@ import {
   Download,
   KeyRound,
   Shield,
-  GraduationCap
+  GraduationCap,
+  MessageSquare
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { classesService } from '../../services/classes.service'
 import { submissionsService } from '../../services/submissions.service'
 import { announcementsService } from '../../services/announcements.service'
+import { messagesService } from '../../services/messages.service'
+import { notificationsService } from '../../services/notifications.service'
+import { useNotifications } from '../../context/NotificationContext'
 import { calculateCompletionRate, isOverdue, formatDisplayDate, formatDeadlineBadge } from '../../utils/calculations'
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
 import Modal from '../../components/common/Modal'
 import { Input, Textarea } from '../../components/common/Input'
+import NotificationBadge from '../../components/common/NotificationBadge'
 import InviteStudentModal from '../../components/class/InviteStudentModal'
 import StudentProfileModal from '../../components/class/StudentProfileModal'
 import TwoStepSubmissionModal from '../../components/student/TwoStepSubmissionModal'
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: BookOpen },
+  { id: 'messages', label: 'Discussion', icon: MessageSquare },
   { id: 'assignments', label: 'Assignments', icon: ClipboardList },
   { id: 'submissions', label: 'Submissions', icon: CheckSquare },
   { id: 'grades', label: 'Scores & Grades', icon: BarChart2 },
@@ -56,6 +62,7 @@ const TABS = [
 export default function ClassDetailPage() {
   const { id: classId } = useParams()
   const { user } = useAuth()
+  const { classUnreadCounts = {}, markClassAsRead } = useNotifications()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -73,6 +80,10 @@ export default function ClassDetailPage() {
   const [announcements, setAnnouncements] = useState([])
   const [activities, setActivities] = useState([])
   const [resources, setResources] = useState([])
+  const [messages, setMessages] = useState([])
+  const [newMessageText, setNewMessageText] = useState('')
+  const [sendingMessage, setSendingMessage] = useState(false)
+  const [lastReadTimestamp, setLastReadTimestamp] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -139,6 +150,17 @@ export default function ClassDetailPage() {
       // 5. Fetch resources
       const res = await classesService.getClassResources(classId)
       setResources(res)
+
+      // 6. Fetch class discussion messages
+      const msgs = await messagesService.getClassMessages(classId)
+      setMessages(msgs)
+      const prevRead = messagesService.getLastReadTimestamp(classId, user?.id)
+      setLastReadTimestamp(prevRead)
+
+      // If already on messages tab, mark as read immediately
+      if (activeTab === 'messages' && markClassAsRead) {
+        markClassAsRead(classId)
+      }
     } catch (err) {
       console.error('[ClassDetailPage] Error loading class details:', err)
       setError(err.message || 'Failed to load class information.')
@@ -146,6 +168,36 @@ export default function ClassDetailPage() {
       setLoading(false)
     }
   }
+
+  // Clear unread badge whenever user opens or is on messages tab
+  useEffect(() => {
+    if (activeTab === 'messages' && classId && markClassAsRead) {
+      markClassAsRead(classId)
+    }
+  }, [activeTab, classId, markClassAsRead])
+
+  // Listen for realtime broadcast messages
+  useEffect(() => {
+    if (!classId) return
+    const channel = messagesService.getChannel()
+
+    const handleBroadcast = ({ event, payload }) => {
+      if (event === 'class-message' && payload?.classId === classId) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === payload.message.id)) return prev
+          return [...prev, payload.message]
+        })
+        if (activeTab === 'messages' && markClassAsRead) {
+          markClassAsRead(classId)
+        }
+      }
+    }
+
+    channel.on('broadcast', { event: '*' }, handleBroadcast)
+    return () => {
+      channel.off('broadcast', { event: '*' }, handleBroadcast)
+    }
+  }, [classId, activeTab, markClassAsRead])
 
   // Copy Enrolment Code Shortcut
   const handleCopyCode = async () => {
@@ -207,6 +259,16 @@ export default function ClassDetailPage() {
       // Refresh activity timeline
       const acts = await classesService.getClassActivity(classId)
       setActivities(acts)
+
+      // Notify class members in real-time
+      await notificationsService.notifyClassMembers({
+        classId,
+        excludeUserId: user.id,
+        title: `Announcement in ${currentClass?.name || 'Class'}`,
+        message: announcementTitle.trim(),
+        type: 'announcement',
+        referenceId: classId,
+      })
     } catch (err) {
       console.error('[ClassDetailPage] Error posting announcement:', err)
       alert(err.message || 'Failed to post announcement.')
@@ -235,6 +297,16 @@ export default function ClassDetailPage() {
       // Refresh activity
       const acts = await classesService.getClassActivity(classId)
       setActivities(acts)
+
+      // Notify the student that their submission has been graded
+      await messagesService.broadcast('notification', {
+        userId: gradingSubmission.student_id,
+        title: `Grade Posted: ${gradingSubmission.assignments?.title || 'Assignment'}`,
+        message: `Your instructor awarded ${Number(gradeScore)} pts. Feedback: "${gradeFeedback.trim() || 'Good job'}"`,
+        type: 'submission',
+        referenceId: gradingSubmission.assignment_id,
+        created_at: new Date().toISOString(),
+      })
 
       setGradingSubmission(null)
       setGradeScore('')
@@ -265,6 +337,42 @@ export default function ClassDetailPage() {
     setResTitle('')
     setResUrl('')
     setIsAddResourceOpen(false)
+  }
+
+  // Send New Message in Class Discussion
+  const handleSendMessage = async (e) => {
+    e.preventDefault()
+    if (!newMessageText.trim() || !user?.id || !currentClass) return
+
+    try {
+      setSendingMessage(true)
+      const createdMsg = await messagesService.sendMessage({
+        classId,
+        senderId: user.id,
+        senderName: user.name,
+        senderRole: user.role,
+        senderAvatar: user.avatar || '',
+        text: newMessageText.trim(),
+      })
+
+      setMessages((prev) => [...prev, createdMsg])
+      setNewMessageText('')
+
+      // Notify other class members (teachers and students)
+      await notificationsService.notifyClassMembers({
+        classId,
+        excludeUserId: user.id,
+        title: `New Discussion Message in ${currentClass.name}`,
+        message: `${user.name || 'Member'}: "${createdMsg.text.slice(0, 80)}"`,
+        type: 'announcement',
+        referenceId: classId,
+      })
+    } catch (err) {
+      console.error('[ClassDetailPage] Error sending message:', err)
+      alert(err.message || 'Failed to send message.')
+    } finally {
+      setSendingMessage(false)
+    }
   }
 
   // Derived metrics
@@ -398,6 +506,9 @@ export default function ClassDetailPage() {
             >
               <Icon className={`w-4 h-4 ${isActive ? 'text-brand-primary' : 'text-slate-400'}`} />
               <span>{tab.label}</span>
+              {tab.id === 'messages' && classUnreadCounts[classId] > 0 && (
+                <NotificationBadge count={classUnreadCounts[classId]} className="ml-1" />
+              )}
               {tab.id === 'assignments' && assignments.length > 0 && (
                 <span className="text-[10px] bg-brand-light text-brand-primary px-1.5 py-0.2 rounded-full font-bold">
                   {assignments.length}
@@ -580,7 +691,132 @@ export default function ClassDetailPage() {
       )}
 
       {/* =========================================================================
-          TAB 2: ASSIGNMENTS (Belonging ONLY to this class)
+          TAB 2: DISCUSSION / MESSAGES (WhatsApp-style real-time class chat)
+      ========================================================================= */}
+      {activeTab === 'messages' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-brand-heading flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-brand-primary" />
+                <span>Class Discussion & Messages ({messages.length})</span>
+              </h3>
+              <p className="text-xs text-brand-muted">
+                Real-time collaborative discussion thread for all students and faculty in {currentClass.name}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                Live Channel Connected
+              </span>
+            </div>
+          </div>
+
+          {/* Messages Thread Container */}
+          <Card padding="p-5 sm:p-6" className="shadow-card space-y-4 min-h-[360px] flex flex-col justify-between">
+            {/* Messages List */}
+            <div className="space-y-4 flex-1 overflow-y-auto max-h-[500px] pr-2">
+              {messages.length > 0 ? (
+                messages.map((msg) => {
+                  const isMe = msg.senderId === user?.id
+                  const isTeacherSender = msg.senderRole === 'admin'
+                  const isNew = lastReadTimestamp && msg.senderId !== user?.id && new Date(msg.createdAt) > new Date(lastReadTimestamp)
+
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`p-4 rounded-2xl transition-all ${
+                        isNew
+                          ? 'border-2 border-brand-primary/60 bg-brand-light/30 shadow-xs'
+                          : isMe
+                          ? 'bg-slate-50 border border-brand-line ml-4 sm:ml-12'
+                          : 'bg-white border border-brand-line/80 shadow-xs mr-4 sm:mr-12'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-brand-light text-brand-primary flex items-center justify-center font-bold text-sm ring-2 ring-brand-border/60 overflow-hidden shrink-0">
+                            {msg.senderAvatar ? (
+                              <img src={msg.senderAvatar} alt={msg.senderName} className="w-full h-full object-cover" />
+                            ) : (
+                              <span>{msg.senderName?.charAt(0) || 'U'}</span>
+                            )}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-xs text-brand-heading">
+                                {msg.senderName}
+                              </span>
+                              <span className={`text-[10px] font-bold px-2 py-0.2 rounded-full ${
+                                isTeacherSender
+                                  ? 'bg-purple-100 text-purple-700'
+                                  : 'bg-blue-100 text-blue-700'
+                              }`}>
+                                {isTeacherSender ? 'Professor' : 'Student'}
+                              </span>
+                              {isNew && (
+                                <span className="text-[9px] font-extrabold uppercase tracking-wider bg-rose-500 text-white px-1.5 py-0.2 rounded-full">
+                                  NEW
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-brand-muted block mt-0.5">
+                              {formatDisplayDate(msg.createdAt)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-brand-body mt-2.5 whitespace-pre-line leading-relaxed pl-12">
+                        {msg.text}
+                      </p>
+                    </div>
+                  )
+                })
+              ) : (
+                <div className="text-center py-16 space-y-2">
+                  <MessageSquare className="w-10 h-10 text-slate-300 mx-auto" />
+                  <p className="text-xs text-brand-muted">
+                    No discussion messages yet in this class. Start the conversation below!
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Message Input Box at bottom */}
+            <form onSubmit={handleSendMessage} className="pt-3 border-t border-brand-line/60 space-y-2.5">
+              <Textarea
+                placeholder="Type your message, query, or update for the class..."
+                value={newMessageText}
+                onChange={(e) => setNewMessageText(e.target.value)}
+                rows={2}
+                required
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-brand-muted">
+                  Press <strong>Send</strong> to instantly broadcast to all enrolled members
+                </span>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  type="submit"
+                  loading={sendingMessage}
+                  disabled={!newMessageText.trim() || sendingMessage}
+                  icon={Send}
+                  className="shadow-purple-glow font-semibold"
+                >
+                  Send Message
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB 3: ASSIGNMENTS (Belonging ONLY to this class)
       ========================================================================= */}
       {activeTab === 'assignments' && (
         <div className="space-y-5">

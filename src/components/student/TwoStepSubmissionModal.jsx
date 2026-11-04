@@ -4,6 +4,8 @@ import confetti from 'canvas-confetti'
 import Modal from '../common/Modal'
 import Button from '../common/Button'
 import { formatDisplayDate } from '../../utils/calculations'
+import { notificationsService } from '../../services/notifications.service'
+import { useAuth } from '../../context/AuthContext'
 
 export default function TwoStepSubmissionModal({
   isOpen,
@@ -13,6 +15,7 @@ export default function TwoStepSubmissionModal({
   onFinalSubmit,
   onSuccessDone,
 }) {
+  const { user } = useAuth()
   const [step, setStep] = useState(1) // 1: Confirm, 2: Confirmed
   const [loading, setLoading] = useState(false)
   const [submittedTime, setSubmittedTime] = useState(null)
@@ -33,6 +36,18 @@ export default function TwoStepSubmissionModal({
       const result = await onFinalSubmit()
       setSubmittedTime(result?.submitted_at || new Date().toISOString())
       setStep(2)
+
+      // Notify teacher and class members of submission in real-time
+      if (assignment?.class_id) {
+        notificationsService.notifyClassMembers({
+          classId: assignment.class_id,
+          excludeUserId: user?.id,
+          title: `New Submission: ${assignment.title}`,
+          message: `${user?.name || 'A student'} submitted deliverable for "${assignment.title}".`,
+          type: 'submission',
+          referenceId: assignment.id,
+        }).catch(() => {})
+      }
 
       // Trigger celebratory confetti
       try {

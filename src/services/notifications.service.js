@@ -1,4 +1,5 @@
-import { supabase } from '../lib/supabase'
+import { supabase } from '../lib/supabase.js'
+import { messagesService } from './messages.service.js'
 
 export const notificationsService = {
   /**
@@ -85,6 +86,70 @@ export const notificationsService = {
     } catch (err) {
       console.warn('[notificationsService] Notification skipped:', err.message)
       return null
+    }
+  },
+
+  /**
+   * Format badge count according to WhatsApp styling (e.g. 1, 5, 12, 99+)
+   */
+  formatBadge(count) {
+    if (!count || count <= 0) return null
+    if (count > 99) return '99+'
+    return String(count)
+  },
+
+  /**
+   * Send notification to all members of a class (excluding the triggering user)
+   */
+  async notifyClassMembers({ classId, excludeUserId, title, message, type = 'general', referenceId = null }) {
+    if (!classId) return
+
+    try {
+      // 1. Fetch class details to get teacher (admin_id) and members
+      const { data: cls } = await supabase
+        .from('classes')
+        .select(`
+          admin_id,
+          class_members (student_id)
+        `)
+        .eq('id', classId)
+        .single()
+
+      if (!cls) return
+
+      const recipients = new Set()
+
+      // Add teacher if not sender
+      if (cls.admin_id && cls.admin_id !== excludeUserId) {
+        recipients.add(cls.admin_id)
+      }
+
+      // Add all students if not sender
+      cls.class_members?.forEach((m) => {
+        if (m.student_id && m.student_id !== excludeUserId) {
+          recipients.add(m.student_id)
+        }
+      })
+
+      // Send to each recipient and broadcast
+      for (const recipientId of recipients) {
+        const notifData = {
+          userId: recipientId,
+          title,
+          message,
+          type,
+          referenceId: referenceId || classId,
+          created_at: new Date().toISOString(),
+        }
+
+        // Try direct insert if admin
+        await this.createNotification(notifData).catch(() => {})
+
+        // Broadcast realtime notification event
+        await messagesService.broadcast('notification', notifData)
+      }
+    } catch (err) {
+      console.warn('[notificationsService] notifyClassMembers error:', err)
     }
   },
 }

@@ -31,9 +31,12 @@ import Badge from '../../components/common/Badge'
 import Card from '../../components/common/Card'
 import Modal from '../../components/common/Modal'
 import { Input, Textarea } from '../../components/common/Input'
+import NotificationBadge from '../../components/common/NotificationBadge'
+import { useNotifications } from '../../context/NotificationContext'
 
 export default function AdminDashboard() {
   const { user } = useAuth()
+  const { classUnreadCounts = {} } = useNotifications()
   const navigate = useNavigate()
 
   // State
@@ -315,6 +318,9 @@ export default function AdminDashboard() {
                     className="flex items-center gap-1.5 bg-white text-brand-primary px-3 py-1 rounded-full text-xs font-bold shadow-md hover:bg-slate-50 transition-all cursor-pointer ml-auto"
                   >
                     <span>Open Class Page</span>
+                    {classUnreadCounts[selectedClass.id] > 0 && (
+                      <NotificationBadge count={classUnreadCounts[selectedClass.id]} />
+                    )}
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 </div>

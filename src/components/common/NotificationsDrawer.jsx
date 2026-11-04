@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { notificationsService } from '../../services/notifications.service'
 import { formatTimeAgo } from '../../utils/calculations'
+import { useAuth } from '../../context/AuthContext'
 import Button from './Button'
 import Badge from './Badge'
 
@@ -22,6 +23,7 @@ export default function NotificationsDrawer({
   onRefresh,
   userId,
 }) {
+  const { user } = useAuth()
   const navigate = useNavigate()
   const [filter, setFilter] = useState('all') // 'all' | 'unread'
   const [loadingAction, setLoadingAction] = useState(false)
@@ -52,6 +54,33 @@ export default function NotificationsDrawer({
       console.error(err)
     } finally {
       setLoadingAction(false)
+    }
+  }
+
+  const handleNotificationClick = async (notif) => {
+    if (!notif.is_read) {
+      try {
+        await notificationsService.markAsRead(notif.id)
+        if (onRefresh) onRefresh()
+      } catch (err) {
+        console.warn('Error marking notification as read:', err)
+      }
+    }
+
+    onClose()
+
+    const activeRole = user?.role === 'admin' ? 'admin' : 'student'
+
+    if (notif.type === 'assignment' && notif.reference_id) {
+      navigate(`/${activeRole}/assignments/${notif.reference_id}`)
+    } else if (notif.type === 'submission') {
+      navigate(`/${activeRole}/submissions`)
+    } else if (notif.type === 'announcement' && notif.reference_id) {
+      navigate(`/${activeRole}/classes/${notif.reference_id}?tab=messages`)
+    } else if (notif.type === 'reminder') {
+      navigate(`/${activeRole}/assignments`)
+    } else {
+      navigate(`/${activeRole}`)
     }
   }
 
@@ -143,12 +172,7 @@ export default function NotificationsDrawer({
             {displayedNotifications.map((notif) => (
               <div
                 key={notif.id}
-                onClick={() => {
-                  if (!notif.is_read) {
-                    notificationsService.markAsRead(notif.id).catch(() => {})
-                  }
-                  onClose()
-                }}
+                onClick={() => handleNotificationClick(notif)}
                 className={`p-4 rounded-xl transition-all cursor-pointer flex items-start gap-3.5 ${
                   notif.is_read ? 'hover:bg-slate-50' : 'bg-brand-light/30 hover:bg-brand-light/50'
                 }`}

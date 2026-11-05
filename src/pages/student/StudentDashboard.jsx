@@ -50,17 +50,32 @@ export default function StudentDashboard() {
     try {
       setLoading(true)
 
-      // 1. Fetch student's class memberships
-      const { data: memberRows } = await supabase
-        .from('class_members')
-        .select(`
-          class_id,
-          classes (id, name, subject, admin_id)
-        `)
-        .eq('student_id', user.id)
+      // 1. Fetch class memberships, selective assignments, and submissions in parallel
+      const [membersResult, specificResult, subsResult] = await Promise.all([
+        supabase
+          .from('class_members')
+          .select(`
+            class_id,
+            classes (id, name, subject, admin_id)
+          `)
+          .eq('student_id', user.id),
+        supabase
+          .from('assignment_students')
+          .select(`
+            assignment_id,
+            assignments (
+              *,
+              classes (id, name, subject)
+            )
+          `)
+          .eq('student_id', user.id),
+        submissionsService.getStudentSubmissions(user.id),
+      ])
 
-      const studentClasses = memberRows?.map((m) => m.classes).filter(Boolean) || []
+      const studentClasses = membersResult.data?.map((m) => m.classes).filter(Boolean) || []
       setClasses(studentClasses)
+      setSubmissions(subsResult || [])
+
       const classIds = studentClasses.map((c) => c.id)
 
       // 2. Fetch assignments assigned to all in student's enrolled classes
@@ -79,19 +94,7 @@ export default function StudentDashboard() {
         allAssigned = classAssignments || []
       }
 
-      // Also fetch assignments where student is selectively assigned (in enrolled classes only)
-      const { data: specificAssignments } = await supabase
-        .from('assignment_students')
-        .select(`
-          assignment_id,
-          assignments (
-            *,
-            classes (id, name, subject)
-          )
-        `)
-        .eq('student_id', user.id)
-
-      const selectiveList = (specificAssignments || [])
+      const selectiveList = (specificResult.data || [])
         .map((s) => s.assignments)
         .filter((a) => a && classIds.includes(a.class_id) && a.status === 'published')
 
@@ -101,10 +104,6 @@ export default function StudentDashboard() {
       selectiveList.forEach((a) => eligibleMap.set(a.id, a))
       const combined = Array.from(eligibleMap.values())
       setAssignments(combined)
-
-      // 3. Fetch student's submissions
-      const studentSubs = await submissionsService.getStudentSubmissions(user.id)
-      setSubmissions(studentSubs || [])
     } catch (err) {
       console.error('[StudentDashboard] Error loading student dashboard:', err)
     } finally {

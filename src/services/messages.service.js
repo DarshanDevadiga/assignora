@@ -18,6 +18,31 @@ export function addMessageOnce(previousMessages = [], newMessage) {
 }
 
 /**
+ * Add a new message or update existing message by ID,
+ * ensuring richer metadata (e.g. sender name/avatar from broadcast) replaces partial DB payloads
+ */
+export function addOrUpdateMessage(previousMessages = [], newMessage) {
+  if (!newMessage || !newMessage.id) return previousMessages
+  const index = previousMessages.findIndex((m) => m.id === newMessage.id)
+  if (index === -1) {
+    return [...previousMessages, newMessage]
+  }
+  const updated = [...previousMessages]
+  const existing = updated[index]
+  updated[index] = {
+    ...existing,
+    ...newMessage,
+    senderName:
+      newMessage.senderName && newMessage.senderName !== 'Class Member'
+        ? newMessage.senderName
+        : existing.senderName || newMessage.senderName || 'Class Member',
+    senderAvatar: newMessage.senderAvatar || existing.senderAvatar || null,
+    senderRole: newMessage.senderRole || existing.senderRole || 'student',
+  }
+  return updated
+}
+
+/**
  * Merge and deduplicate an array of incoming messages into an existing message array,
  * preserving chronological order by created_at
  */
@@ -36,6 +61,7 @@ export function mergeMessages(previousMessages = [], incomingMessages = []) {
 
 export const messagesService = {
   addMessageOnce,
+  addOrUpdateMessage,
   mergeMessages,
   /**
    * Initialize or retrieve the global Supabase Realtime channel

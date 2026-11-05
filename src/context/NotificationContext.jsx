@@ -31,7 +31,7 @@ export function NotificationProvider({ children }) {
     }
   }, [])
 
-  // 2. Fetch and calculate unread messages per class
+  // 2. Fetch and calculate unread messages per class (optimized single batch query)
   const loadClassUnreadCounts = useCallback(async () => {
     const currentUserId = userIdRef.current
     if (!currentUserId) return
@@ -58,14 +58,27 @@ export function NotificationProvider({ children }) {
       }
 
       const counts = {}
+      enrolledClassIds.forEach((id) => {
+        counts[id] = 0
+      })
 
-      await Promise.all(
-        enrolledClassIds.map(async (classId) => {
-          const msgs = await messagesService.getClassMessages(classId)
-          const unread = messagesService.getUnreadCount(classId, currentUserId, msgs)
-          counts[classId] = unread
-        })
-      )
+      // Single indexed query to count recent unread messages across all classes
+      const { data: recentMsgs, error: msgErr } = await supabase
+        .from('class_messages')
+        .select('id, class_id, sender_id, created_at')
+        .in('class_id', enrolledClassIds)
+        .neq('sender_id', currentUserId)
+        .order('created_at', { ascending: false })
+        .limit(100)
+
+      if (!msgErr && recentMsgs) {
+        for (const msg of recentMsgs) {
+          const lastRead = messagesService.getLastReadTimestamp(msg.class_id, currentUserId)
+          if (!lastRead || new Date(msg.created_at) > new Date(lastRead)) {
+            counts[msg.class_id] = (counts[msg.class_id] || 0) + 1
+          }
+        }
+      }
 
       setClassUnreadCounts(counts)
     } catch (err) {

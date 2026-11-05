@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BookOpen,
@@ -34,7 +34,7 @@ import { useAuth } from '../../context/AuthContext'
 import { classesService } from '../../services/classes.service'
 import { submissionsService } from '../../services/submissions.service'
 import { announcementsService } from '../../services/announcements.service'
-import { messagesService, addMessageOnce, mergeMessages } from '../../services/messages.service'
+import { messagesService, addMessageOnce, addOrUpdateMessage, mergeMessages } from '../../services/messages.service'
 import { notificationsService } from '../../services/notifications.service'
 import { useNotifications } from '../../context/NotificationContext'
 import { supabase } from '../../lib/supabase.js'
@@ -43,7 +43,10 @@ import {
   isOverdue,
   formatDisplayDate,
   formatDeadlineBadge,
-  calculateLetterGrade
+  calculateLetterGrade,
+  formatMessageDateSeparator,
+  formatMessageTime,
+  isDifferentDay,
 } from '../../utils/calculations'
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
@@ -123,6 +126,62 @@ export default function ClassDetailPage() {
 
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const refreshClassDetails = () => setRefreshTrigger((prev) => prev + 1)
+
+  // Stable references for realtime listener closures to prevent stale state and unnecessary channel reconnects
+  const userRef = useRef(user)
+  const currentClassRef = useRef(currentClass)
+  const activeTabRef = useRef(activeTab)
+
+  useEffect(() => {
+    userRef.current = user
+  }, [user])
+
+  useEffect(() => {
+    currentClassRef.current = currentClass
+  }, [currentClass])
+
+  useEffect(() => {
+    activeTabRef.current = activeTab
+  }, [activeTab])
+
+  // Resolve sender metadata (name, role, avatar) accurately from class roster and teacher info
+  const resolveSenderProfile = useCallback((senderId) => {
+    if (!senderId) return { name: 'Member', role: 'student', avatar: null }
+
+    const currentUser = userRef.current
+    if (currentUser && currentUser.id === senderId) {
+      return {
+        name: currentUser.name || 'You',
+        role: currentUser.role || 'student',
+        avatar: currentUser.avatar || null,
+      }
+    }
+
+    const cls = currentClassRef.current
+    if (cls) {
+      // Check if sender is class instructor/admin
+      if (cls.admin_id === senderId || cls.users?.id === senderId) {
+        return {
+          name: cls.users?.name || 'Professor',
+          role: 'admin',
+          avatar: cls.users?.avatar || null,
+        }
+      }
+      // Check if sender is an enrolled student member
+      const member = cls.class_members?.find(
+        (m) => m.student_id === senderId || m.users?.id === senderId
+      )
+      if (member?.users) {
+        return {
+          name: member.users.name || 'Student',
+          role: member.users.role || 'student',
+          avatar: member.users.avatar || null,
+        }
+      }
+    }
+
+    return { name: 'Student', role: 'student', avatar: null }
+  }, [])
 
   useEffect(() => {
     let isCancelled = false
@@ -258,10 +317,10 @@ export default function ClassDetailPage() {
       if (!isSubscribed) return
       if (event === 'class-message' && payload?.classId === classId && payload?.message) {
         // Ignore self-broadcast if senderId matches current user (sender handles own state update on send completion)
-        if (payload.senderId && payload.senderId === user?.id) return
+        if (payload.senderId && payload.senderId === userRef.current?.id) return
 
-        setMessages((prev) => addMessageOnce(prev, payload.message))
-        if (activeTab === 'messages' && markClassAsRead) {
+        setMessages((prev) => addOrUpdateMessage(prev, payload.message))
+        if (activeTabRef.current === 'messages' && markClassAsRead) {
           markClassAsRead(classId)
         }
       }
@@ -281,19 +340,21 @@ export default function ClassDetailPage() {
       (payload) => {
         if (!isSubscribed || !payload?.new) return
         const newRow = payload.new
+        const profileInfo = resolveSenderProfile(newRow.sender_id)
+
         const incomingMsg = {
           id: newRow.id,
           classId: newRow.class_id,
           senderId: newRow.sender_id,
-          senderName: newRow.sender_id === user?.id ? (user?.name || 'You') : 'Class Member',
-          senderRole: newRow.sender_id === currentClass?.admin_id ? 'admin' : 'student',
-          senderAvatar: null,
+          senderName: profileInfo.name,
+          senderRole: profileInfo.role,
+          senderAvatar: profileInfo.avatar,
           text: newRow.message,
           createdAt: newRow.created_at,
           isDiscussion: true,
         }
-        setMessages((prev) => addMessageOnce(prev, incomingMsg))
-        if (activeTab === 'messages' && markClassAsRead) {
+        setMessages((prev) => addOrUpdateMessage(prev, incomingMsg))
+        if (activeTabRef.current === 'messages' && markClassAsRead) {
           markClassAsRead(classId)
         }
       }
@@ -320,7 +381,7 @@ export default function ClassDetailPage() {
         classChannel = null
       }
     }
-  }, [classId, activeTab, markClassAsRead])
+  }, [classId, markClassAsRead, resolveSenderProfile])
 
   // Copy Enrolment Code Shortcut
   const handleCopyCode = async () => {
@@ -483,7 +544,7 @@ export default function ClassDetailPage() {
       })
 
       if (createdMsg) {
-        setMessages((prev) => addMessageOnce(prev, createdMsg))
+        setMessages((prev) => addOrUpdateMessage(prev, createdMsg))
       }
 
       // Notify other class members (teachers and students)
@@ -845,60 +906,75 @@ export default function ClassDetailPage() {
             {/* Messages List */}
             <div className="space-y-4 flex-1 overflow-y-auto max-h-[500px] pr-2">
               {messages.length > 0 ? (
-                messages.map((msg) => {
+                messages.map((msg, idx) => {
+                  const currentMsgDate = msg.createdAt || msg.created_at
+                  const prevMsgDate = idx > 0 ? (messages[idx - 1].createdAt || messages[idx - 1].created_at) : null
+                  const showDateSeparator = idx === 0 || isDifferentDay(prevMsgDate, currentMsgDate)
+
                   const isMe = msg.senderId === user?.id
                   const isTeacherSender = msg.senderRole === 'admin'
-                  const isNew = lastReadTimestamp && msg.senderId !== user?.id && new Date(msg.createdAt) > new Date(lastReadTimestamp)
+                  const isNew = lastReadTimestamp && msg.senderId !== user?.id && new Date(currentMsgDate) > new Date(lastReadTimestamp)
 
                   return (
-                    <div
-                      key={msg.id}
-                      className={`p-4 rounded-2xl transition-all ${
-                        isNew
-                          ? 'border-2 border-brand-primary/60 bg-brand-light/30 shadow-xs'
-                          : isMe
-                          ? 'bg-slate-50 border border-brand-line ml-4 sm:ml-12'
-                          : 'bg-white border border-brand-line/80 shadow-xs mr-4 sm:mr-12'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-brand-light text-brand-primary flex items-center justify-center font-bold text-sm ring-2 ring-brand-border/60 overflow-hidden shrink-0">
-                            {msg.senderAvatar ? (
-                              <img src={msg.senderAvatar} alt={msg.senderName} className="w-full h-full object-cover" />
-                            ) : (
-                              <span>{msg.senderName?.charAt(0) || 'U'}</span>
-                            )}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-xs text-brand-heading">
-                                {msg.senderName}
-                              </span>
-                              <span className={`text-[10px] font-bold px-2 py-0.2 rounded-full ${
-                                isTeacherSender
-                                  ? 'bg-purple-100 text-purple-700'
-                                  : 'bg-blue-100 text-blue-700'
-                              }`}>
-                                {isTeacherSender ? 'Professor' : 'Student'}
-                              </span>
-                              {isNew && (
-                                <span className="text-[9px] font-extrabold uppercase tracking-wider bg-rose-500 text-white px-1.5 py-0.2 rounded-full">
-                                  NEW
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-[10px] text-brand-muted block mt-0.5">
-                              {formatDisplayDate(msg.createdAt)}
-                            </span>
+                    <React.Fragment key={msg.id}>
+                      {showDateSeparator && (
+                        <div className="flex items-center justify-center my-3.5">
+                          <div className="flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-slate-100/90 border border-brand-line text-[11px] font-semibold text-brand-muted shadow-xs">
+                            <Calendar className="w-3 h-3 text-brand-primary" />
+                            <span>{formatMessageDateSeparator(currentMsgDate)}</span>
                           </div>
                         </div>
-                      </div>
+                      )}
 
-                      <p className="text-xs text-brand-body mt-2.5 whitespace-pre-line leading-relaxed pl-12">
-                        {msg.text}
-                      </p>
-                    </div>
+                      <div
+                        className={`p-4 rounded-2xl transition-all ${
+                          isNew
+                            ? 'border-2 border-brand-primary/60 bg-brand-light/30 shadow-xs'
+                            : isMe
+                            ? 'bg-slate-50 border border-brand-line ml-4 sm:ml-12'
+                            : 'bg-white border border-brand-line/80 shadow-xs mr-4 sm:mr-12'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-full bg-brand-light text-brand-primary flex items-center justify-center font-bold text-sm ring-2 ring-brand-border/60 overflow-hidden shrink-0">
+                              {msg.senderAvatar ? (
+                                <img src={msg.senderAvatar} alt={msg.senderName} className="w-full h-full object-cover" />
+                              ) : (
+                                <span>{msg.senderName?.charAt(0) || 'U'}</span>
+                              )}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-xs text-brand-heading">
+                                  {msg.senderName}
+                                </span>
+                                <span className={`text-[10px] font-bold px-2 py-0.2 rounded-full border ${
+                                  isTeacherSender
+                                    ? 'bg-purple-100 text-purple-700 border-purple-200'
+                                    : 'bg-blue-100 text-blue-700 border-blue-200'
+                                }`}>
+                                  {isTeacherSender ? 'Professor' : 'Student'}
+                                </span>
+                                {isNew && (
+                                  <span className="text-[9px] font-extrabold uppercase tracking-wider bg-rose-500 text-white px-1.5 py-0.2 rounded-full">
+                                    NEW
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-brand-muted flex items-center gap-1 mt-0.5">
+                                <Clock className="w-2.5 h-2.5 text-slate-400" />
+                                <span>{formatMessageTime(currentMsgDate)}</span>
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <p className="text-xs text-brand-body mt-2.5 whitespace-pre-line leading-relaxed pl-12">
+                          {msg.text}
+                        </p>
+                      </div>
+                    </React.Fragment>
                   )
                 })
               ) : (

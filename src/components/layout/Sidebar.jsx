@@ -58,7 +58,7 @@ export default function Sidebar({
           ? location.pathname === item.path
           : location.pathname.startsWith(item.path)
 
-        const isClassesNav = item.name === 'My Classes'
+        const isClassesNav = item.name === 'My Classes' || item.name === 'Classes'
         const badgeCount = isClassesNav ? unreadClassesCount : 0
 
         return (

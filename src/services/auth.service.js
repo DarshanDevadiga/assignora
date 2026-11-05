@@ -1,10 +1,24 @@
 import { supabase } from '../lib/supabase.js'
 
+const profileCache = new Map()
+const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
+
 /**
  * Authentication Service for Assignora
  * Interacts with Supabase GoTrue Auth and public.users profile table.
  */
 export const authService = {
+  /**
+   * Clear in-memory profile cache
+   */
+  clearProfileCache(userId) {
+    if (userId) {
+      profileCache.delete(userId)
+    } else {
+      profileCache.clear()
+    }
+  },
+
   /**
    * Sign in with email and password
    */
@@ -65,10 +79,17 @@ export const authService = {
   },
 
   /**
-   * Fetch profile from public.users table by user id
+   * Fetch profile from public.users table by user id (cached in memory for high performance)
    */
-  async getUserProfile(userId) {
+  async getUserProfile(userId, forceFresh = false) {
     if (!userId) return null
+
+    if (!forceFresh && profileCache.has(userId)) {
+      const cached = profileCache.get(userId)
+      if (Date.now() - cached.timestamp < CACHE_TTL_MS) {
+        return cached.profile
+      }
+    }
 
     const { data, error } = await supabase
       .from('users')
@@ -81,6 +102,7 @@ export const authService = {
       return null
     }
 
+    profileCache.set(userId, { profile: data, timestamp: Date.now() })
     return data
   },
 

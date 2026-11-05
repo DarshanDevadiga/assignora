@@ -63,6 +63,9 @@ export default function AdminDashboard() {
   const [newClassDescription, setNewClassDescription] = useState('')
   const [creatingClass, setCreatingClass] = useState(false)
 
+  // State for all announcements to enable instant class switching without network round-trips
+  const [allAnnouncementsCache, setAllAnnouncementsCache] = useState([])
+
   // Fetch initial dashboard data
   useEffect(() => {
     loadDashboardData()
@@ -72,22 +75,24 @@ export default function AdminDashboard() {
     if (!user?.id) return
     try {
       setLoading(true)
-      const [fetchedClasses, fetchedAssignments] = await Promise.all([
+      const [fetchedClasses, fetchedAssignments, fetchedAnnouncements] = await Promise.all([
         classesService.getAdminClasses(user.id),
         assignmentsService.getAdminAssignments(user.id),
+        announcementsService.getAnnouncements().catch(() => []),
       ])
 
       setClasses(fetchedClasses)
+      setAssignments(fetchedAssignments)
+      setAllAnnouncementsCache(fetchedAnnouncements)
+
       if (fetchedClasses.length > 0) {
         const active = fetchedClasses[0]
         setSelectedClass(active)
-        const classAnnouncements = await announcementsService.getAnnouncements(active.id)
-        setAnnouncements(classAnnouncements)
+        setAnnouncements(fetchedAnnouncements.filter((a) => a.class_id === active.id))
       } else {
         setSelectedClass(null)
         setAnnouncements([])
       }
-      setAssignments(fetchedAssignments)
     } catch (err) {
       console.error('[AdminDashboard] Failed to load data:', err)
     } finally {
@@ -95,15 +100,10 @@ export default function AdminDashboard() {
     }
   }
 
-  // Handle active class change
-  const handleSelectClass = async (cls) => {
+  // Handle active class change with instantaneous in-memory filter
+  const handleSelectClass = (cls) => {
     setSelectedClass(cls)
-    try {
-      const classAnnouncements = await announcementsService.getAnnouncements(cls.id)
-      setAnnouncements(classAnnouncements)
-    } catch (err) {
-      console.error('[AdminDashboard] Error switching class announcements:', err)
-    }
+    setAnnouncements(allAnnouncementsCache.filter((a) => a.class_id === cls.id))
   }
 
   // Post announcement

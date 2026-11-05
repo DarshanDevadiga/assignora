@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Send, CheckCircle2, X, Clock, ExternalLink } from 'lucide-react'
 import confetti from 'canvas-confetti'
 import Modal from '../common/Modal'

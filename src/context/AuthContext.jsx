@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useMemo } from 'react'
+import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react'
 import { authService } from '../services/auth.service'
 
 const AuthContext = createContext(null)
@@ -22,8 +22,20 @@ export function AuthProvider({ children }) {
   const initial = useMemo(() => getInitialCachedAuth(), [])
   const [authUser, setAuthUser] = useState(initial.user)
   const [profile, setProfile] = useState(initial.profile)
-  const [loading, setLoading] = useState(!initial.user)
+  // If we have a cached user and profile, we can immediately show the shell without blocking
+  const [loading, setLoading] = useState(!initial.user || !initial.profile)
   const [error, setError] = useState(null)
+
+  const profileRef = useRef(initial.profile)
+  const authUserRef = useRef(initial.user)
+
+  useEffect(() => {
+    profileRef.current = profile
+  }, [profile])
+
+  useEffect(() => {
+    authUserRef.current = authUser
+  }, [authUser])
 
   // Initialize auth state and restore session in background
   useEffect(() => {
@@ -34,16 +46,18 @@ export function AuthProvider({ children }) {
         const session = await authService.getSession()
         if (session?.user && isMounted) {
           setAuthUser(session.user)
-          // Fetch freshest user profile
-          const userProfile = await authService.getUserProfile(session.user.id)
-          if (isMounted) {
-            setProfile(userProfile)
-            try {
-              localStorage.setItem(
-                CACHE_KEY,
-                JSON.stringify({ user: session.user, profile: userProfile })
-              )
-            } catch (e) {}
+          // If we already have the profile for this user cached, don't block
+          if (!profileRef.current || profileRef.current.id !== session.user.id) {
+            const userProfile = await authService.getUserProfile(session.user.id)
+            if (isMounted) {
+              setProfile(userProfile)
+              try {
+                localStorage.setItem(
+                  CACHE_KEY,
+                  JSON.stringify({ user: session.user, profile: userProfile })
+                )
+              } catch (e) {}
+            }
           }
         } else if (!session && isMounted) {
           setAuthUser(null)
@@ -69,20 +83,24 @@ export function AuthProvider({ children }) {
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         if (session?.user) {
           setAuthUser(session.user)
-          const userProfile = await authService.getUserProfile(session.user.id)
-          if (isMounted) {
-            setProfile(userProfile)
-            try {
-              localStorage.setItem(
-                CACHE_KEY,
-                JSON.stringify({ user: session.user, profile: userProfile })
-              )
-            } catch (e) {}
+          // Only fetch if profile is not already loaded or belongs to another user
+          if (!profileRef.current || profileRef.current.id !== session.user.id) {
+            const userProfile = await authService.getUserProfile(session.user.id)
+            if (isMounted) {
+              setProfile(userProfile)
+              try {
+                localStorage.setItem(
+                  CACHE_KEY,
+                  JSON.stringify({ user: session.user, profile: userProfile })
+                )
+              } catch (e) {}
+            }
           }
         }
       } else if (event === 'SIGNED_OUT') {
         setAuthUser(null)
         setProfile(null)
+        authService.clearProfileCache()
         try {
           localStorage.removeItem(CACHE_KEY)
         } catch (e) {}
@@ -102,6 +120,7 @@ export function AuthProvider({ children }) {
     const result = await authService.signIn(email, password)
     setAuthUser(result.user)
     setProfile(result.profile)
+    setLoading(false)
     try {
       localStorage.setItem(
         CACHE_KEY,
@@ -113,6 +132,7 @@ export function AuthProvider({ children }) {
 
   const signOut = async () => {
     setError(null)
+    authService.clearProfileCache()
     // Synchronously purge state & localStorage so UI responds with zero lag
     setAuthUser(null)
     setProfile(null)

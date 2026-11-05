@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Users, Search, Check, X } from 'lucide-react'
 import Modal from '../common/Modal'
 import Button from '../common/Button'

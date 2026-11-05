@@ -5,6 +5,7 @@ import Modal from '../common/Modal'
 import Button from '../common/Button'
 import { formatDisplayDate } from '../../utils/calculations'
 import { notificationsService } from '../../services/notifications.service'
+import { submissionsService } from '../../services/submissions.service'
 import { useAuth } from '../../context/AuthContext'
 
 export default function TwoStepSubmissionModal({
@@ -14,6 +15,7 @@ export default function TwoStepSubmissionModal({
   submissionData,
   onFinalSubmit,
   onSuccessDone,
+  onSuccess,
 }) {
   const { user } = useAuth()
   const [step, setStep] = useState(1) // 1: Confirm, 2: Confirmed
@@ -22,7 +24,7 @@ export default function TwoStepSubmissionModal({
   const [errorMessage, setErrorMessage] = useState('')
 
   // Reset step whenever modal opens
-  React.useEffect(() => {
+  useEffect(() => {
     if (isOpen) {
       setStep(1)
       setErrorMessage('')
@@ -33,7 +35,26 @@ export default function TwoStepSubmissionModal({
     try {
       setLoading(true)
       setErrorMessage('')
-      const result = await onFinalSubmit()
+
+      // Resilient submission handler execution:
+      // Validates onFinalSubmit before invoking and supports direct fallback to prevent runtime TypeError
+      let result = null
+      if (typeof onFinalSubmit === 'function') {
+        result = await onFinalSubmit()
+      } else if (typeof onSuccess === 'function') {
+        result = await onSuccess()
+      } else if (assignment?.id && user?.id) {
+        // Built-in resilient fallback: directly submit to database via submissionsService
+        result = await submissionsService.submitAssignment({
+          assignmentId: assignment.id,
+          studentId: user.id,
+          submissionLink: submissionData?.submissionLink || '',
+          comment: submissionData?.comment || 'Submitted via Two-Step Confirmation',
+        })
+      } else {
+        throw new Error('Submission handler is not properly configured. Please contact your instructor.')
+      }
+
       setSubmittedTime(result?.submitted_at || new Date().toISOString())
       setStep(2)
 
@@ -70,7 +91,11 @@ export default function TwoStepSubmissionModal({
 
   const handleFinish = () => {
     onClose()
-    if (onSuccessDone) onSuccessDone()
+    if (typeof onSuccessDone === 'function') {
+      onSuccessDone()
+    } else if (typeof onSuccess === 'function') {
+      onSuccess()
+    }
   }
 
   if (!isOpen) return null

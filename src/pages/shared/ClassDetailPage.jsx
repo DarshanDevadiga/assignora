@@ -1258,7 +1258,7 @@ export default function ClassDetailPage() {
                           size="sm"
                           icon={Send}
                           className="shadow-purple-glow font-semibold"
-                          onClick={() => setSubmittingAssignment(assignment)}
+                          onClick={() => navigate(`/student/assignments/${assignment.id}`)}
                         >
                           Submit Work
                         </Button>
@@ -1685,9 +1685,14 @@ export default function ClassDetailPage() {
           isOpen={Boolean(submittingAssignment)}
           onClose={() => setSubmittingAssignment(null)}
           assignment={submittingAssignment}
-          onSuccess={() => {
-            setSubmittingAssignment(null)
-            refreshClassDetails()
+          onFinalSubmit={async () => {
+            if (!submittingAssignment?.id || !user?.id) return null
+            return await submissionsService.submitAssignment({
+              assignmentId: submittingAssignment.id,
+              studentId: user.id,
+              submissionLink: '',
+              comment: 'Submitted from Class Coursework',
+            })
           }}
           onSuccessDone={() => {
             setSubmittingAssignment(null)

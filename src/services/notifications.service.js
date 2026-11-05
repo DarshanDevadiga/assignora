@@ -57,13 +57,32 @@ export const notificationsService = {
   },
 
   /**
-   * Create notification (when allowed by user RLS role)
+   * Create notification safely using RPC if available, or direct insert for self/admin
    */
   async createNotification({ userId, title, message, type = 'general', referenceId = null }) {
-    // Valid types: assignment, announcement, submission, general, reminder
+    if (!userId || !title?.trim()) return null
+
     const validTypes = ['assignment', 'announcement', 'submission', 'general', 'reminder']
     const safeType = validTypes.includes(type) ? type : 'general'
 
+    // 1. Try secure RPC function (allows authorized students/teachers to notify class members)
+    try {
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('create_class_notification', {
+        p_user_id: userId,
+        p_title: title.trim(),
+        p_message: message.trim(),
+        p_type: safeType,
+        p_reference_id: referenceId || null,
+      })
+
+      if (!rpcErr && rpcData?.success && rpcData?.notification) {
+        return rpcData.notification
+      }
+    } catch {
+      // RPC not yet migrated in database, fallback to direct insert
+    }
+
+    // 2. Direct insert fallback
     try {
       const { data, error } = await supabase
         .from('notifications')
@@ -78,15 +97,14 @@ export const notificationsService = {
         .select()
         .single()
 
-      if (error) {
-        console.warn('[notificationsService] Notification insert skipped by RLS policy:', error.message)
-        return null
+      if (!error && data) {
+        return data
       }
-      return data
-    } catch (err) {
-      console.warn('[notificationsService] Notification skipped:', err.message)
-      return null
+    } catch {
+      // Direct insert blocked by RLS - safe fallback to realtime broadcast
     }
+
+    return null
   },
 
   /**

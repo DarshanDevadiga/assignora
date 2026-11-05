@@ -34,7 +34,7 @@ import { useAuth } from '../../context/AuthContext'
 import { classesService } from '../../services/classes.service'
 import { submissionsService } from '../../services/submissions.service'
 import { announcementsService } from '../../services/announcements.service'
-import { messagesService } from '../../services/messages.service'
+import { messagesService, addMessageOnce, mergeMessages } from '../../services/messages.service'
 import { notificationsService } from '../../services/notifications.service'
 import { useNotifications } from '../../context/NotificationContext'
 import { supabase } from '../../lib/supabase.js'
@@ -202,7 +202,7 @@ export default function ClassDetailPage() {
         }
 
         if (msgsRes.status === 'fulfilled') {
-          setMessages(msgsRes.value || [])
+          setMessages((prev) => mergeMessages(prev, msgsRes.value || []))
         } else {
           console.warn('[ClassDetailPage] Could not load messages:', msgsRes.reason)
         }
@@ -248,18 +248,19 @@ export default function ClassDetailPage() {
       supabase.removeChannel(existing)
     }
 
+    // Configure channel with self: false so sender never receives self-broadcast echo
     const channel = supabase.channel(`class-discussion:${classId}`, {
-      config: { broadcast: { self: true } },
+      config: { broadcast: { self: false } },
     })
     classChannel = channel
 
     const handleBroadcast = ({ event, payload }) => {
       if (!isSubscribed) return
-      if (event === 'class-message' && payload?.classId === classId) {
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === payload.message?.id)) return prev
-          return [...prev, payload.message]
-        })
+      if (event === 'class-message' && payload?.classId === classId && payload?.message) {
+        // Ignore self-broadcast if senderId matches current user (sender handles own state update on send completion)
+        if (payload.senderId && payload.senderId === user?.id) return
+
+        setMessages((prev) => addMessageOnce(prev, payload.message))
         if (activeTab === 'messages' && markClassAsRead) {
           markClassAsRead(classId)
         }
@@ -267,6 +268,36 @@ export default function ClassDetailPage() {
     }
 
     channel.on('broadcast', { event: '*' }, handleBroadcast)
+
+    // Also listen to database-level INSERT events on class_messages for real-time Postgres synchronization
+    channel.on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'class_messages',
+        filter: `class_id=eq.${classId}`,
+      },
+      (payload) => {
+        if (!isSubscribed || !payload?.new) return
+        const newRow = payload.new
+        const incomingMsg = {
+          id: newRow.id,
+          classId: newRow.class_id,
+          senderId: newRow.sender_id,
+          senderName: newRow.sender_id === user?.id ? (user?.name || 'You') : 'Class Member',
+          senderRole: newRow.sender_id === currentClass?.admin_id ? 'admin' : 'student',
+          senderAvatar: null,
+          text: newRow.message,
+          createdAt: newRow.created_at,
+          isDiscussion: true,
+        }
+        setMessages((prev) => addMessageOnce(prev, incomingMsg))
+        if (activeTab === 'messages' && markClassAsRead) {
+          markClassAsRead(classId)
+        }
+      }
+    )
 
     channel.subscribe((status, error) => {
       if (!isSubscribed) return
@@ -434,21 +465,26 @@ export default function ClassDetailPage() {
   // Send New Message in Class Discussion
   const handleSendMessage = async (e) => {
     e.preventDefault()
-    if (!newMessageText.trim() || !user?.id || !currentClass) return
+    if (sendingMessage) return
+    const textToSend = newMessageText.trim()
+    if (!textToSend || !user?.id || !currentClass) return
 
     try {
       setSendingMessage(true)
+      setNewMessageText('') // Clear immediately to prevent double submissions
+
       const createdMsg = await messagesService.sendMessage({
         classId,
         senderId: user.id,
         senderName: user.name,
         senderRole: user.role,
         senderAvatar: user.avatar || '',
-        text: newMessageText.trim(),
+        text: textToSend,
       })
 
-      setMessages((prev) => [...prev, createdMsg])
-      setNewMessageText('')
+      if (createdMsg) {
+        setMessages((prev) => addMessageOnce(prev, createdMsg))
+      }
 
       // Notify other class members (teachers and students)
       await notificationsService.notifyClassMembers({
@@ -461,6 +497,8 @@ export default function ClassDetailPage() {
       })
     } catch (err) {
       console.error('[ClassDetailPage] Error sending message:', err)
+      // Restore input text on error so user doesn't lose typed message
+      setNewMessageText(textToSend)
       alert(err.message || 'Failed to send message.')
     } finally {
       setSendingMessage(false)

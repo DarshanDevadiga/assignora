@@ -22,7 +22,7 @@ export default function InviteStudentModal({ isOpen, onClose, currentClass }) {
   const classCode = classesService.getClassCode(currentClass)
   const formattedCode = `CLS-${classCode}`
   const inviteToken = classesService.generateInviteToken(currentClass.id)
-  const inviteUrl = `${window.location.origin}/join?code=${classCode}`
+  const inviteUrl = `${window.location.origin}/join-class?code=${classCode}`
 
   const handleCopyCode = async () => {
     try {

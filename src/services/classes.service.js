@@ -106,19 +106,59 @@ export const classesService = {
   },
 
   /**
+   * Generate human-readable uppercase alphanumeric class code (e.g. MATH26)
+   */
+  generateClassCode(name = '', subject = '') {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    let prefix = ''
+    const source = (subject || name).replace(/[^a-zA-Z]/g, '').toUpperCase()
+    if (source.length >= 3) {
+      prefix = source.slice(0, 3)
+    }
+    let randomPart = ''
+    const targetLen = prefix ? 3 : 6
+    for (let i = 0; i < targetLen; i++) {
+      randomPart += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+    return (prefix + randomPart).slice(0, 6).toUpperCase()
+  },
+
+  /**
    * Create a new class
    */
   async createClass(classData) {
-    const { data, error } = await supabase
+    const generatedCode = classData.class_code || this.generateClassCode(classData.name, classData.subject)
+    
+    // First try inserting with class_code
+    let { data, error } = await supabase
       .from('classes')
       .insert({
         name: classData.name.trim(),
         subject: classData.subject?.trim() || '',
         description: classData.description?.trim() || '',
         admin_id: classData.admin_id,
+        class_code: generatedCode,
       })
       .select()
       .single()
+
+    // If schema does not yet have class_code column, fall back without class_code
+    if (error && (error.message?.includes('class_code') || error.code === 'PGRST204')) {
+      console.warn('[classesService] class_code column not in DB yet, falling back to base columns:', error.message)
+      const fallback = await supabase
+        .from('classes')
+        .insert({
+          name: classData.name.trim(),
+          subject: classData.subject?.trim() || '',
+          description: classData.description?.trim() || '',
+          admin_id: classData.admin_id,
+        })
+        .select()
+        .single()
+
+      data = fallback.data
+      error = fallback.error
+    }
 
     if (error) {
       console.error('[classesService] Error creating class:', error)
@@ -217,9 +257,13 @@ export const classesService = {
   },
 
   /**
-   * Compute deterministic 6-character unique class code from class ID
+   * Compute or retrieve deterministic 6-character unique class code from class object/ID
    */
   getClassCode(clsOrId) {
+    if (!clsOrId) return ''
+    if (typeof clsOrId === 'object' && clsOrId.class_code) {
+      return clsOrId.class_code.toUpperCase().replace(/^CLS-/, '')
+    }
     const id = typeof clsOrId === 'string' ? clsOrId : clsOrId?.id
     if (!id) return ''
     const clean = id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6).toUpperCase()
@@ -227,14 +271,43 @@ export const classesService = {
   },
 
   /**
-   * Find class by code or UUID
+   * Find and preview class by code or UUID (securely supports unenrolled students via RPC)
    */
   async findClassByCode(rawCode) {
     if (!rawCode) return null
-    const code = rawCode.trim().toUpperCase().replace(/^CLS-/, '')
+    const cleanCode = rawCode.trim().toUpperCase().replace(/^CLS-/, '')
 
-    // First try direct ID match if it's a UUID
-    if (code.length === 36 && code.includes('-')) {
+    // 1. Try secure database function get_class_preview_by_code
+    try {
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('get_class_preview_by_code', {
+        p_code: cleanCode,
+      })
+      if (!rpcErr && rpcRes?.success && rpcRes.class) {
+        return rpcRes.class
+      }
+    } catch (e) {
+      console.warn('[classesService] get_class_preview_by_code RPC fallback:', e)
+    }
+
+    // 2. Try direct query on classes table by class_code
+    try {
+      const { data: directMatch, error: directErr } = await supabase
+        .from('classes')
+        .select(`
+          *,
+          users:admin_id (id, name, email, avatar),
+          class_members (id, student_id)
+        `)
+        .eq('class_code', cleanCode)
+        .maybeSingle()
+
+      if (!directErr && directMatch) return directMatch
+    } catch {
+      // column may not exist or blocked by RLS
+    }
+
+    // 3. Try direct ID match if it's a UUID
+    if (cleanCode.length === 36 && cleanCode.includes('-')) {
       const { data } = await supabase
         .from('classes')
         .select(`
@@ -247,26 +320,97 @@ export const classesService = {
       if (data) return data
     }
 
-    // Match by derived 6-character code
-    const { data: allClasses, error } = await supabase
-      .from('classes')
-      .select(`
-        *,
-        users:admin_id (id, name, email, avatar),
-        class_members (id, student_id)
-      `)
+    // 4. Fallback: match by derived code across accessible classes
+    try {
+      const { data: allClasses } = await supabase
+        .from('classes')
+        .select(`
+          *,
+          users:admin_id (id, name, email, avatar),
+          class_members (id, student_id)
+        `)
 
-    if (error || !allClasses) {
-      console.error('[classesService] Error searching class by code:', error)
-      return null
+      if (allClasses && allClasses.length > 0) {
+        const matched = allClasses.find((c) => {
+          const derived = (c.class_code || c.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6)).toUpperCase()
+          return derived === cleanCode || c.id === rawCode.trim()
+        })
+        if (matched) return matched
+      }
+    } catch (err) {
+      console.error('[classesService] Error in fallback class search:', err)
     }
 
-    const matched = allClasses.find((c) => {
-      const derived = c.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6).toUpperCase()
-      return derived === code || c.id === rawCode.trim()
-    })
+    return null
+  },
 
-    return matched || null
+  /**
+   * Secure student class joining via database RPC
+   * Uses auth.uid() inside SECURITY DEFINER function to enforce student role and prevent duplicate membership
+   */
+  async joinClassByCode(rawCode) {
+    if (!rawCode || !rawCode.trim()) {
+      throw new Error('Please enter a class code.')
+    }
+
+    const cleanCode = rawCode.trim().toUpperCase().replace(/^CLS-/, '')
+
+    // 1. Primary method: secure join_class_by_code RPC
+    try {
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('join_class_by_code', {
+        p_code: cleanCode,
+      })
+
+      if (!rpcErr && rpcRes) {
+        if (rpcRes.success) {
+          return {
+            success: true,
+            classId: rpcRes.class_id,
+            className: rpcRes.class_name,
+            membershipId: rpcRes.membership_id,
+            message: rpcRes.message || 'Successfully joined class!',
+          }
+        }
+        if (rpcRes.already_member) {
+          throw new Error('You are already enrolled in this class.')
+        }
+        if (rpcRes.error) {
+          throw new Error(rpcRes.error)
+        }
+      }
+      if (rpcErr && rpcErr.code !== 'PGRST202') {
+        throw new Error(rpcErr.message || 'Failed to join class.')
+      }
+    } catch (err) {
+      if (
+        err.message?.includes('already enrolled') ||
+        err.message?.includes('Invalid class code') ||
+        err.message?.includes('Only student accounts')
+      ) {
+        throw err
+      }
+      console.warn('[classesService] join_class_by_code RPC failed or not present, trying fallback:', err)
+    }
+
+    // 2. Fallback method: find class then enroll
+    const cls = await this.findClassByCode(cleanCode)
+    if (!cls) {
+      throw new Error('Invalid class code. Please check with your teacher and try again.')
+    }
+
+    const { data: authSession } = await supabase.auth.getSession()
+    const studentId = authSession?.session?.user?.id
+    if (!studentId) {
+      throw new Error('You must be signed in to join a class.')
+    }
+
+    await this.enrollStudent(cls.id, studentId, cleanCode)
+    return {
+      success: true,
+      classId: cls.id,
+      className: cls.name,
+      message: 'Successfully joined class!',
+    }
   },
 
   /**
@@ -291,9 +435,10 @@ export const classesService = {
   async verifyInviteToken(token) {
     if (!token) return { valid: false, error: 'Token is missing' }
 
-    // If it's a standard 6-char code
-    if (token.length <= 10 && !token.includes('{') && !token.includes('=')) {
-      const cls = await this.findClassByCode(token)
+    // If it's a standard 6-char code or CLS- prefix
+    const cleanToken = token.trim().toUpperCase().replace(/^CLS-/, '')
+    if (cleanToken.length <= 10 && !cleanToken.includes('{') && !cleanToken.includes('=')) {
+      const cls = await this.findClassByCode(cleanToken)
       if (!cls) return { valid: false, error: 'Invalid class code' }
       return { valid: true, class: cls, classId: cls.id, expiresAt: null }
     }
@@ -323,15 +468,43 @@ export const classesService = {
   },
 
   /**
-   * Student enrolment into class (Method A & B)
-   * Prevents duplicates and gracefully handles database RLS via admin fallback bridge
+   * Student enrolment into class (Strictly preserves active user session)
+   * Prevents duplicates and never switches account
    */
-  async enrollStudent(classId, studentId) {
+  async enrollStudent(classId, studentId, classCode = null) {
     if (!classId || !studentId) {
       throw new Error('Class ID and Student ID are required')
     }
 
-    // 1. Check if already enrolled
+    // 1. Try secure RPC if code is provided
+    if (classCode) {
+      try {
+        const { data: rpcRes, error: rpcErr } = await supabase.rpc('join_class_by_code', {
+          p_code: classCode.trim().toUpperCase().replace(/^CLS-/, ''),
+        })
+        if (!rpcErr && rpcRes) {
+          if (rpcRes.success) {
+            return {
+              id: rpcRes.membership_id,
+              class_id: rpcRes.class_id,
+              student_id: studentId,
+            }
+          }
+          if (rpcRes.already_member) {
+            throw new Error('You are already enrolled in this class.')
+          }
+          if (rpcRes.error) {
+            throw new Error(rpcRes.error)
+          }
+        }
+      } catch (err) {
+        if (err.message?.includes('already enrolled') || err.message?.includes('Invalid class code')) {
+          throw err
+        }
+      }
+    }
+
+    // 2. Check if already enrolled in local database
     const { data: existing, error: exErr } = await supabase
       .from('class_members')
       .select('id')
@@ -343,8 +516,8 @@ export const classesService = {
       throw new Error('You are already enrolled in this class.')
     }
 
-    // 2. Try direct insert with student session
-    let { data: newMember, error: insertError } = await supabase
+    // 3. Direct insert using current student session (no account switching)
+    const { data: newMember, error: insertError } = await supabase
       .from('class_members')
       .insert({
         class_id: classId,
@@ -359,40 +532,12 @@ export const classesService = {
       `)
       .maybeSingle()
 
-    // 3. If RLS blocked student self-insert, invoke the secure admin client bridge
     if (insertError) {
-      console.log('[classesService] Direct insert hit RLS, activating admin bridge enrollment...')
-      const { createClient } = await import('@supabase/supabase-js')
-      const bridgeClient = createClient(supabaseUrl, supabaseAnonKey)
-      // Authenticate with admin demo account to authorize member enrollment
-      await bridgeClient.auth.signInWithPassword({
-        email: 'admin@assignora.demo',
-        password: 'Admin@12345',
-      })
-
-      const { data: bridgeMember, error: bridgeError } = await bridgeClient
-        .from('class_members')
-        .insert({
-          class_id: classId,
-          student_id: studentId,
-        })
-        .select(`
-          id,
-          class_id,
-          student_id,
-          joined_at,
-          users:student_id (id, name, email, avatar, student_id)
-        `)
-        .single()
-
-      if (bridgeError) {
-        if (bridgeError.code === '23505') {
-          throw new Error('You are already enrolled in this class.')
-        }
-        throw new Error(bridgeError.message || 'Failed to complete enrolment.')
+      if (insertError.code === '23505') {
+        throw new Error('You are already enrolled in this class.')
       }
-
-      newMember = bridgeMember
+      console.error('[classesService] Direct insert error:', insertError)
+      throw new Error(insertError.message || 'Failed to complete enrolment. Please check with your teacher.')
     }
 
     return newMember

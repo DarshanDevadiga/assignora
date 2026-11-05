@@ -67,7 +67,7 @@ export default function JoinClassPage() {
 
       // If user is already logged in, check if already enrolled
       if (user?.id) {
-        const isMember = cls.class_members?.some((m) => m.student_id === user.id)
+        const isMember = cls.is_enrolled || cls.class_members?.some((m) => m.student_id === user.id)
         if (isMember) {
           setInvitationStatus('accepted')
         } else {
@@ -95,7 +95,8 @@ export default function JoinClassPage() {
     try {
       setJoining(true)
       setError(null)
-      await classesService.enrollStudent(classInfo.id, user.id)
+      const currentCode = manualCode || queryValue || classInfo.class_code || ''
+      await classesService.enrollStudent(classInfo.id, user.id, currentCode)
       setInvitationStatus('accepted')
 
       setTimeout(() => {

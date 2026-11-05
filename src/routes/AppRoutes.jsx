@@ -72,6 +72,7 @@ export default function AppRoutes({ user, loading, onLogout }) {
 
         {/* Public / Semi-Public Join & Invitation Route */}
         <Route path="/join" element={<JoinClassPage />} />
+        <Route path="/join-class" element={<JoinClassPage />} />
         <Route path="/invite" element={<JoinClassPage />} />
 
         {/* Admin Protected Routes */}

@@ -45,9 +45,32 @@ export default function Login() {
       const { profile } = await signIn(email.trim(), password)
       
       const targetRole = profile?.role || 'student'
+
+      // Check query param 'redirect' or 'returnUrl' or code
+      const queryParams = new URLSearchParams(location.search)
+      const redirectParam = queryParams.get('redirect') || queryParams.get('returnUrl')
+      const codeParam = queryParams.get('code')
+
+      if (redirectParam) {
+        navigate(redirectParam, { replace: true })
+        return
+      }
+
+      if (codeParam) {
+        navigate(`/join-class?code=${encodeURIComponent(codeParam)}`, { replace: true })
+        return
+      }
+
       const from = location.state?.from?.pathname
-      if (from && ((targetRole === 'admin' && from.startsWith('/admin')) || (targetRole === 'student' && from.startsWith('/student')))) {
-        navigate(from, { replace: true })
+      const fromSearch = location.state?.from?.search || ''
+      if (
+        from &&
+        (from.startsWith('/join') ||
+          from.startsWith('/invite') ||
+          (targetRole === 'admin' && from.startsWith('/admin')) ||
+          (targetRole === 'student' && from.startsWith('/student')))
+      ) {
+        navigate(from + fromSearch, { replace: true })
       } else {
         navigate(targetRole === 'admin' ? '/admin' : '/student', { replace: true })
       }

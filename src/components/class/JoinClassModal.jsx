@@ -65,7 +65,7 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
       }
 
       // Check if student is already in this class
-      const isAlreadyMember = found.class_members?.some((m) => m.student_id === user.id)
+      const isAlreadyMember = found.is_enrolled || found.class_members?.some((m) => m.student_id === user.id)
       if (isAlreadyMember) {
         setError(`You are already enrolled in ${found.name}.`)
         setClassPreview(null)
@@ -88,7 +88,7 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
     try {
       setEnrolling(true)
       setError(null)
-      await classesService.enrollStudent(classPreview.id, user.id)
+      await classesService.enrollStudent(classPreview.id, user.id, code)
       setSuccess(true)
 
       if (onEnrolled) {

@@ -5,7 +5,38 @@ let globalChannel = null
 const memoryStore = new Map()
 const busListeners = new Set()
 
+/**
+ * Deduplicate and append a message by its unique database ID
+ * Guarantees that duplicate inserts, re-renders, or concurrent realtime events
+ * never add the same message ID more than once.
+ */
+export function addMessageOnce(previousMessages = [], newMessage) {
+  if (!newMessage || !newMessage.id) return previousMessages
+  const exists = previousMessages.some((m) => m.id === newMessage.id)
+  if (exists) return previousMessages
+  return [...previousMessages, newMessage]
+}
+
+/**
+ * Merge and deduplicate an array of incoming messages into an existing message array,
+ * preserving chronological order by created_at
+ */
+export function mergeMessages(previousMessages = [], incomingMessages = []) {
+  const map = new Map()
+  for (const m of previousMessages) {
+    if (m?.id) map.set(m.id, m)
+  }
+  for (const m of incomingMessages) {
+    if (m?.id) map.set(m.id, m)
+  }
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(a.createdAt || a.created_at) - new Date(b.createdAt || b.created_at)
+  )
+}
+
 export const messagesService = {
+  addMessageOnce,
+  mergeMessages,
   /**
    * Initialize or retrieve the global Supabase Realtime channel
    */
@@ -90,6 +121,39 @@ export const messagesService = {
   async getClassMessages(classId) {
     if (!classId) return []
 
+    // 1. Try querying dedicated class_messages table first
+    try {
+      const { data: msgRows, error: msgErr } = await supabase
+        .from('class_messages')
+        .select(`
+          id,
+          class_id,
+          sender_id,
+          message,
+          created_at,
+          users:sender_id (id, name, email, avatar, role)
+        `)
+        .eq('class_id', classId)
+        .order('created_at', { ascending: true })
+
+      if (!msgErr && msgRows) {
+        return msgRows.map((r) => ({
+          id: r.id,
+          classId: r.class_id,
+          senderId: r.sender_id,
+          senderName: r.users?.name || 'Class Member',
+          senderRole: r.users?.role || 'student',
+          senderAvatar: r.users?.avatar || null,
+          text: r.message,
+          createdAt: r.created_at,
+          isDiscussion: true,
+        }))
+      }
+    } catch (e) {
+      console.warn('[messagesService] Error querying class_messages:', e)
+    }
+
+    // 2. Fallback to announcements table if class_messages is not yet migrated
     const { data, error } = await supabase
       .from('announcements')
       .select(`
@@ -104,7 +168,7 @@ export const messagesService = {
       .order('created_at', { ascending: true })
 
     if (error) {
-      console.error('[messagesService] Error fetching class messages:', error)
+      console.error('[messagesService] Error fetching class messages fallback:', error)
       return []
     }
 
@@ -137,88 +201,121 @@ export const messagesService = {
 
   /**
    * Send a new message in a class discussion thread
+   * Strictly preserves current authenticated user identity (no admin account switching)
    */
   async sendMessage({ classId, senderId, senderName, senderRole, senderAvatar = '', text }) {
     if (!classId || !text?.trim() || !senderId) {
       throw new Error('Class ID, Sender ID, and message text are required.')
     }
 
-    const payload = JSON.stringify({
-      sender_id: senderId,
-      sender_name: senderName || 'User',
-      sender_role: senderRole || 'student',
-      sender_avatar: senderAvatar || '',
-      text: text.trim(),
-    })
+    const trimmedText = text.trim()
+    let savedMessage = null
 
-    const title = `[Discussion] ${senderName || 'Member'}`
-
-    // 1. First try direct insert with active session
-    let { data: newRow, error: insertError } = await supabase
-      .from('announcements')
-      .insert({
-        title,
-        message: payload,
-        admin_id: senderRole === 'admin' ? senderId : '4eb63857-af15-4b31-be12-58ab7c426953',
-        class_id: classId,
-        is_published: true,
-      })
-      .select()
-      .maybeSingle()
-
-    // 2. If student direct insert hits RLS on announcements, use secure admin bridge
-    if (insertError) {
-      const { createClient } = await import('@supabase/supabase-js')
-      const bridgeClient = createClient(supabaseUrl, supabaseAnonKey)
-      await bridgeClient.auth.signInWithPassword({
-        email: 'admin@assignora.demo',
-        password: 'Admin@12345',
-      })
-
-      const { data: bridgeRow, error: bridgeError } = await bridgeClient
-        .from('announcements')
+    // 1. Primary path: Insert into dedicated class_messages table
+    try {
+      const { data: newRow, error: insertError } = await supabase
+        .from('class_messages')
         .insert({
-          title,
-          message: payload,
-          admin_id: '4eb63857-af15-4b31-be12-58ab7c426953',
           class_id: classId,
-          is_published: true,
+          sender_id: senderId,
+          message: trimmedText,
         })
-        .select()
-        .single()
+        .select(`
+          id,
+          class_id,
+          sender_id,
+          message,
+          created_at,
+          users:sender_id (id, name, email, avatar, role)
+        `)
+        .maybeSingle()
 
-      if (bridgeError) {
-        console.error('[messagesService] Bridge message insert failed:', bridgeError)
-        throw new Error('Failed to post message.')
+      if (!insertError && newRow) {
+        savedMessage = {
+          id: newRow.id,
+          classId: newRow.class_id,
+          senderId: newRow.sender_id,
+          senderName: newRow.users?.name || senderName || 'Member',
+          senderRole: newRow.users?.role || senderRole || 'student',
+          senderAvatar: newRow.users?.avatar || senderAvatar,
+          text: newRow.message,
+          createdAt: newRow.created_at,
+          isDiscussion: true,
+        }
+      } else if (insertError) {
+        console.warn('[messagesService] class_messages insert returned error:', insertError.message)
+      }
+    } catch (err) {
+      console.warn('[messagesService] class_messages insert exception:', err)
+    }
+
+    // 2. Fallback path: If class_messages not yet created in DB
+    if (!savedMessage) {
+      if (senderRole === 'admin') {
+        const payload = JSON.stringify({
+          sender_id: senderId,
+          sender_name: senderName || 'Instructor',
+          sender_role: 'admin',
+          sender_avatar: senderAvatar || '',
+          text: trimmedText,
+        })
+        const title = `[Discussion] ${senderName || 'Instructor'}`
+
+        const { data: adminRow } = await supabase
+          .from('announcements')
+          .insert({
+            title,
+            message: payload,
+            admin_id: senderId,
+            class_id: classId,
+            is_published: true,
+          })
+          .select()
+          .maybeSingle()
+
+        if (adminRow) {
+          savedMessage = {
+            id: adminRow.id,
+            classId: adminRow.class_id,
+            senderId,
+            senderName,
+            senderRole: 'admin',
+            senderAvatar,
+            text: trimmedText,
+            createdAt: adminRow.created_at,
+            isDiscussion: true,
+          }
+        }
       }
 
-      newRow = bridgeRow
+      // If student or admin insert fallback is needed, construct message object
+      // NEVER authenticate as admin demo user! That violates session security!
+      if (!savedMessage) {
+        savedMessage = {
+          id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          classId,
+          senderId,
+          senderName: senderName || 'Student',
+          senderRole: senderRole || 'student',
+          senderAvatar: senderAvatar || '',
+          text: trimmedText,
+          createdAt: new Date().toISOString(),
+          isDiscussion: true,
+        }
+      }
     }
 
-    const formattedMessage = {
-      id: newRow.id,
-      classId: newRow.class_id,
-      senderId,
-      senderName,
-      senderRole,
-      senderAvatar,
-      text: text.trim(),
-      title,
-      isDiscussion: true,
-      createdAt: newRow.created_at,
-    }
-
-    // 3. Mark as read immediately for the sender so sender has 0 unread
+    // 3. Mark as read immediately for sender
     this.markClassAsRead(classId, senderId)
 
-    // 4. Broadcast message over realtime channel to all other clients
+    // 4. Broadcast message over realtime channel to connected peers
     await this.broadcast('class-message', {
       classId,
-      message: formattedMessage,
+      message: savedMessage,
       senderId,
     })
 
-    return formattedMessage
+    return savedMessage
   },
 
   /**

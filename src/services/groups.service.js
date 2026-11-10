@@ -286,6 +286,80 @@ export const groupsService = {
   },
 
   /**
+   * Fetch all group submissions for a specific assignment (for professor tracking)
+   */
+  async getAllGroupSubmissionsForAssignment(assignmentId) {
+    if (!assignmentId) return []
+
+    try {
+      const { data, error } = await supabase
+        .from('group_submissions')
+        .select(`
+          *,
+          leader:acknowledged_by (id, name, email, avatar)
+        `)
+        .eq('assignment_id', assignmentId)
+
+      if (error) {
+        console.warn('[groupsService] getAllGroupSubmissionsForAssignment fallback:', error.message)
+        const mockSubs = this.getStoredMockData()?.group_subs || {}
+        return Object.values(mockSubs).filter((s) => s.assignment_id === assignmentId)
+      }
+
+      return data || []
+    } catch (err) {
+      console.warn('[groupsService] getAllGroupSubmissionsForAssignment exception:', err)
+      return []
+    }
+  },
+
+  /**
+   * Fetch assignment history and acknowledgement status for a specific group
+   */
+  async getGroupAssignmentHistory(classId, groupId) {
+    if (!classId || !groupId) return []
+
+    try {
+      // 1. Get all group assignments for the class
+      const { data: assignments, error: aErr } = await supabase
+        .from('assignments')
+        .select('id, title, description, due_date, due_time, points, submission_type, onedrive_link, status')
+        .eq('class_id', classId)
+        .eq('submission_type', 'group')
+        .order('due_date', { ascending: false })
+
+      if (aErr) throw aErr
+
+      // 2. Get group submissions for this group
+      const { data: submissions, error: sErr } = await supabase
+        .from('group_submissions')
+        .select(`
+          *,
+          leader:acknowledged_by (id, name, email, avatar)
+        `)
+        .eq('group_id', groupId)
+
+      if (sErr) throw sErr
+
+      const subMap = new Map((submissions || []).map((s) => [s.assignment_id, s]))
+
+      return (assignments || []).map((a) => {
+        const sub = subMap.get(a.id)
+        return {
+          ...a,
+          submission: sub || null,
+          isAcknowledged: Boolean(sub),
+          acknowledgedAt: sub?.acknowledged_at || null,
+          acknowledgedBy: sub?.leader?.name || null,
+        }
+      })
+    } catch (err) {
+      console.warn('[groupsService] getGroupAssignmentHistory exception:', err)
+      return []
+    }
+  },
+
+  /**
    * Professor grades a group submission
    */
   async gradeGroupSubmission(submissionId, marks, feedback = '') {

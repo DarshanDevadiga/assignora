@@ -32,6 +32,7 @@ import {
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
+import Modal from '../../components/common/Modal'
 import { Input, Textarea } from '../../components/common/Input'
 import TwoStepSubmissionModal from '../../components/student/TwoStepSubmissionModal'
 import GroupManagementModal from '../../components/group/GroupManagementModal'
@@ -50,6 +51,7 @@ export default function AssignmentDetails() {
   // Group modal state
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false)
   const [groupModalInitialTab, setGroupModalInitialTab] = useState('create')
+  const [isConfirmLeaderModalOpen, setIsConfirmLeaderModalOpen] = useState(false)
 
   // Submission inputs
   const [submissionLink, setSubmissionLink] = useState('')
@@ -124,8 +126,8 @@ export default function AssignmentDetails() {
     return result
   }
 
-  // Group Leader Acknowledgement
-  const handleGroupLeaderAcknowledgement = async (e) => {
+  // Group Leader Acknowledgement - Step 1: Open Confirmation Modal
+  const handleOpenLeaderConfirmModal = (e) => {
     e.preventDefault()
     if (!studentGroup) {
       setErrorMessage('You must be in a group to submit this assignment.')
@@ -139,7 +141,12 @@ export default function AssignmentDetails() {
       setErrorMessage('Please provide a submission link (OneDrive, Google Drive, or GitHub).')
       return
     }
+    setErrorMessage('')
+    setIsConfirmLeaderModalOpen(true)
+  }
 
+  // Group Leader Acknowledgement - Step 2: Final RPC execution
+  const handleConfirmGroupSubmit = async () => {
     try {
       setSubmittingGroup(true)
       setErrorMessage('')
@@ -150,6 +157,7 @@ export default function AssignmentDetails() {
         comment.trim()
       )
 
+      setIsConfirmLeaderModalOpen(false)
       if (res?.submission) {
         setGroupSubmission(res.submission)
       } else {
@@ -379,7 +387,7 @@ export default function AssignmentDetails() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2.5 pt-1">
+                  <div className="flex items-center gap-2.5 pt-1 flex-wrap">
                     <Button
                       variant="primary"
                       size="sm"
@@ -402,6 +410,15 @@ export default function AssignmentDetails() {
                     >
                       Join Group
                     </Button>
+                    {assignment.class_id && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => navigate(`/student/classes/${assignment.class_id}?tab=groups`)}
+                      >
+                        View Course Groups
+                      </Button>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -517,7 +534,7 @@ export default function AssignmentDetails() {
                     </div>
                   ) : isLeader ? (
                     /* Current user is the leader and hasn't submitted yet */
-                    <form onSubmit={handleGroupLeaderAcknowledgement} className="space-y-4">
+                    <form onSubmit={handleOpenLeaderConfirmModal} className="space-y-4">
                       {errorMessage && (
                         <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">
                           {errorMessage}
@@ -555,18 +572,23 @@ export default function AssignmentDetails() {
                         className="w-full justify-center shadow-purple-glow font-semibold mt-2 cursor-pointer"
                         icon={Send}
                       >
-                        Acknowledge & Submit for Group
+                        Yes, I have submitted
                       </Button>
                     </form>
                   ) : (
                     /* Current user is an ordinary member (not leader) */
-                    <div className="p-4 rounded-xl bg-slate-50 border border-brand-line space-y-2.5 text-center py-6">
-                      <div className="w-10 h-10 rounded-full bg-brand-light text-brand-primary flex items-center justify-center mx-auto">
-                        <Shield className="w-5 h-5" />
+                    <div className="p-5 rounded-xl bg-slate-50 border border-brand-line space-y-3 text-center py-6">
+                      <div className="w-10 h-10 rounded-full bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto">
+                        <Clock className="w-5 h-5" />
                       </div>
-                      <h4 className="text-xs sm:text-sm font-bold text-brand-heading">
-                        Awaiting Leader Acknowledgement
-                      </h4>
+                      <div className="space-y-1">
+                        <Badge variant="warning" size="md">
+                          Not submitted by group leader
+                        </Badge>
+                        <h4 className="text-xs sm:text-sm font-bold text-brand-heading pt-1">
+                          Awaiting Leader Acknowledgement
+                        </h4>
+                      </div>
                       <p className="text-xs text-brand-muted max-w-xs mx-auto leading-relaxed">
                         Only your group leader, <strong>{studentGroup.leader?.name || 'Group Leader'}</strong>, can acknowledge and submit this assignment on behalf of the group.
                       </p>
@@ -727,6 +749,66 @@ export default function AssignmentDetails() {
             loadAssignmentAndSubmission()
           }}
         />
+      )}
+
+      {/* Group Leader Submission Confirmation Modal */}
+      {isGroup && (
+        <Modal
+          isOpen={isConfirmLeaderModalOpen}
+          onClose={() => !submittingGroup && setIsConfirmLeaderModalOpen(false)}
+          title="Confirm Group Submission"
+          size="md"
+        >
+          <div className="space-y-4">
+            <div className="p-4 rounded-xl bg-brand-light border border-brand-border/80 text-brand-heading space-y-2">
+              <div className="flex items-center gap-2 font-bold text-sm text-brand-primary">
+                <Crown className="w-4 h-4 text-amber-500" />
+                <span>Submitting for {studentGroup?.name}</span>
+              </div>
+              <p className="text-xs text-brand-body leading-relaxed">
+                As the group leader, you are submitting this assignment on behalf of all members in <strong>{studentGroup?.name}</strong>.
+              </p>
+            </div>
+
+            <div className="space-y-1.5 bg-slate-50 p-3.5 rounded-xl border border-brand-line text-xs">
+              <span className="font-semibold text-brand-heading block">Project Submission Link:</span>
+              <span className="text-brand-primary font-mono break-all">{submissionLink}</span>
+              {comment && (
+                <div className="pt-2 mt-2 border-t border-brand-line/60">
+                  <span className="font-semibold text-brand-heading block">Submission Notes:</span>
+                  <span className="text-brand-muted">{comment}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <p>
+                Once confirmed, all group members will see this submission marked as acknowledged by you with an official timestamp.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-brand-line/60">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={submittingGroup}
+                onClick={() => setIsConfirmLeaderModalOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                loading={submittingGroup}
+                icon={CheckCircle2}
+                onClick={handleConfirmGroupSubmit}
+              >
+                Confirm & Submit
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   )

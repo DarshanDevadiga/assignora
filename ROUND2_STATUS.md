@@ -5,7 +5,7 @@
 **Target Database:** `trkcagoxopabqerljgvn` (PostgreSQL 17.11 on Supabase ap-southeast-1)  
 **Production URL:** https://assignora-cyan.vercel.app/  
 **Repository:** https://github.com/DarshanDevadiga/assignora  
-**Last Updated:** 2026-11-10T14:11:00+05:30  
+**Last Updated:** 2026-11-10T14:59:30+05:30  
 
 ---
 
@@ -20,35 +20,69 @@
 | **Database Migration Execution** | **PASS** | Applied `20261110000000_round2_groups_and_acknowledgements.sql` to live database `trkcagoxopabqerljgvn` |
 | **Post-Migration Verification** | **PASS** | Ran `post_migration_verification.sql`; all 8 catalog checks passed (`[]`, 0 errors) |
 | **Non-Destructive Rollback** | **PASS** | Manifest-guarded, fail-closed, zero `CASCADE` (all drops use `RESTRICT`), preserves pre-existing state |
-| **Frontend: Auth & Registration** | **PASS** | Dual-role registration (`Register.jsx`), quick-fill demo buttons (`Login.jsx`), session persistence |
-| **Frontend: Group Service & UI** | **PASS** | `groups.service.js` and `GroupManagementModal.jsx` created with full live RPC integration |
-| **Frontend: Professor Workflow** | **PASS** | `CreateAssignment.jsx` (submission type, OneDrive), `AssignmentsList.jsx` (class filter), and `SubmissionTracking.jsx` |
-| **Frontend: Student Workflow** | **PASS** | `AssignmentDetails.jsx` updated with leader-only acknowledgement and exact required empty state |
-| **Production Build Check** | **PASS** | `npm run build` completed cleanly in 25.62s (2175 modules, 0 errors) |
-| **Regression Verification** | **PASS** | 100% pass across messaging sync, submission workflow, and baseline invariant suite |
+| **In-Course Groups Page/Tab** | **PASS** | `ClassGroupsTab.jsx` embedded into `ClassDetailPage.jsx` under `Groups` tab |
+| **Group Details Modal & History** | **PASS** | `GroupDetailsModal.jsx` displays leader badge, member roster, assignment history, and status |
+| **Leader-Only Acknowledgement** | **PASS** | Two-step dialog with `"Yes, I have submitted"`, member timestamp, and `"Not submitted by group leader"` |
+| **Empty Group State Guard** | **PASS** | Exact text `"You are not part of any group. Create or join one to submit this assignment."` |
+| **Professor Dual-List Tracking** | **PASS** | `SubmissionTracking.jsx` displays progress bar, stats, **SUBMITTED GROUPS**, and **NOT SUBMITTED GROUPS** |
+| **Group Grading & CSV Export** | **PASS** | Modal for grading group deliverables via `grade_group_submission` RPC; CSV exports with leader & members |
+| **Production Build Check** | **PASS** | `npm run build` completed cleanly in 24.67s (2177 modules, 0 errors) |
+| **Regression Verification** | **PASS** | 100% pass across individual submissions, group RPCs, and baseline invariant suite |
 | **README Documentation** | **PASS** | `README.md` completely updated with Task 1 vs Task 2 separation, Mermaid diagram, demo logins, submission checklist |
 
 ---
 
 ## 2. Concrete Work Completed
 
-1. **Live Database Migration Applied & Verified (`trkcagoxopabqerljgvn`)**:
-   - `preflight_validation.sql` executed: verified 9 prerequisite tables and `extensions.gen_random_bytes`.
-   - Core migration applied:
-     - `assignments` enhanced with `submission_type` (default 'individual', CHECK 'individual'/'group') and `onedrive_link`.
-     - `faculty_invitations` created with 192-bit CSPRNG token generator (`create_faculty_invitation`) and single-use redemption (`register_user_profile`).
-     - `groups` and `group_members` created with case-insensitive unique naming, single-group-per-student constraint, column-level privilege confinement (`authenticated` can update ONLY `name`), and immutable lifecycle triggers.
-     - `group_submissions` created with `ON DELETE RESTRICT` on assignments and groups, preserving academic history.
-     - 10 concurrency-hardened SECURITY DEFINER RPCs created with `SET search_path = pg_catalog, pg_temp` and advisory/row-level locking.
-     - 12 anti-bypass RLS policies created.
-     - Realtime publication registered for `groups`, `group_members`, and `group_submissions`.
-     - All 50 objects recorded in `public._assignora_migration_manifest`.
-   - `post_migration_verification.sql` executed: verified exact function signatures, `prosecdef`, `search_path`, column privileges, foreign key restrict actions, active triggers, and manifest protection. All checks passed (`[]`).
+1. **In-Course Class Groups Section (`ClassGroupsTab.jsx` & `ClassDetailPage.jsx`)**:
+   - Added `Groups` tab to the course navigation alongside `Overview`, `Assignments`, `People`, `Messages`, and `Resources`.
+   - Displays all groups belonging to the active course with search filter.
+   - Shows Group Name, Leader with Crown badge, member avatars and names, member count, and assignment status.
+   - Provides `Create Group`, `Join Group`, and `View Details` modal actions directly in course context.
+   - Creator of a group automatically becomes leader with immediate Leader badge and member enrollment.
+   - Prevents joining a second group in the same course via database invariant.
 
-2. **Automated Verification Suites Executed**:
-   - `node scripts/verify-round2-database-invariants.js`: **PASS** (baseline tables verified under RLS, 1000 CSPRNG tokens generated without collision, groups schema constraints verified).
-   - `node scripts/verify-submission-full.js`: **PASS** (assignment creation, student submissions, duplicate prevention, grading/review inspection).
-   - `npm run build`: **PASS** (2175 modules bundled in 25.62s, 0 errors).
+2. **Group Details Modal (`GroupDetailsModal.jsx`)**:
+   - Full-featured modal displaying Course Name, Group Name, Leader Profile with Crown badge.
+   - Complete Member Roster with Leader vs Member distinguishing badges and email IDs.
+   - Group Assignment History listing all assignments with due dates, points, deliverables, and acknowledgement status.
+
+3. **Student Group Assignment Submission Workflow (`AssignmentDetails.jsx`)**:
+   - When student is not part of any group:
+     - Exact required prompt: `"You are not part of any group. Create or join one to submit this assignment."`
+     - Includes Create Group, Join Group, and View Course Groups action buttons.
+   - Group Leader Acknowledgement:
+     - Submission button: `"Yes, I have submitted"`
+     - Triggers confirmation dialog modal (`Confirm Group Submission`) before invoking `acknowledgeGroupAssignment`.
+     - Displays deliverable link and notes.
+   - Shared Group Member Status:
+     - All members see: `"Acknowledged by [Leader Name] on [Date and Time]"`
+     - Non-leader members prior to submission see: `"Not submitted by group leader"` and `"Awaiting Leader Acknowledgement"`.
+
+4. **Professor Group Assignment Tracking (`SubmissionTracking.jsx`)**:
+   - Detects `submission_type === 'group'` and switches to dual-list group view.
+   - Progress bar with completion percentage:
+     `[Percentage]% ([Acknowledged] of [Total] Groups Submitted)`
+   - 5 Summary metric cards: Total Groups, Acknowledged, Unacknowledged, Graded Groups, Awaiting Grading.
+   - Search filter to filter groups by name, leader, or member name.
+   - **SUBMITTED GROUPS**: Group Name, Leader with Crown, Members roster, Acknowledged By, Acknowledgement Timestamp, Deliverable link, Marks, Grade, Feedback, and Grade Group button.
+   - **NOT SUBMITTED GROUPS**: Group Name, Leader, Members roster, Member count, and Pending/Overdue status.
+   - Group grading modal evaluating group deliverable and recording grade via `grade_group_submission` RPC.
+   - Dedicated Group CSV Export (`Group_Submissions_[Title].csv`).
+   - Completely preserves Round 1 individual assignment tracking table and workflows when `submission_type === 'individual'`.
+
+5. **Live Database Migration Applied & Verified (`trkcagoxopabqerljgvn`)**:
+   - All 50 objects recorded in `public._assignora_migration_manifest`.
+   - Tables: `faculty_invitations`, `groups`, `group_members`, `group_submissions`.
+   - Columns: `assignments.submission_type`, `assignments.onedrive_link`.
+   - 10 `SECURITY DEFINER` RPCs with `search_path = pg_catalog, pg_temp`.
+   - 12 anti-bypass RLS policies.
+   - Foreign keys enforce `ON DELETE RESTRICT` to protect submission history.
+
+6. **Automated Verification Suites Executed**:
+   - `node scripts/verify-round2-database-invariants.js`: **PASS**
+   - `node scripts/verify-submission-full.js`: **PASS**
+   - `npm run build`: **PASS** (2177 modules bundled in 24.67s, 0 errors).
 
 ---
 
@@ -58,39 +92,27 @@
 - **Target DB:** `trkcagoxopabqerljgvn` (PostgreSQL 17.11 on AWS ap-southeast-1)
 - **Manifest Count:** 50 objects recorded in `_assignora_migration_manifest`
   - Columns: 2 (`assignments.submission_type`, `assignments.onedrive_link`)
-  - Check Constraints: 1 (`assignments_submission_type_check`)
-  - Functions / RPCs: 13 (10 RPCs + 3 trigger functions)
-  - Indexes: 12
-  - RLS Policies: 12
-  - Realtime Publications: 3
   - Tables: 4 (`faculty_invitations`, `groups`, `group_members`, `group_submissions`)
-  - Triggers: 3
-- **Round 1 Data Preservation:** 100% verified. Zero rows deleted from Round 1 tables.
+  - Functions: 10 (`create_course_group`, `join_course_group`, `leave_course_group`, `transfer_group_leadership`, `archive_course_group`, `disband_course_group`, `acknowledge_group_assignment`, `grade_group_submission`, `register_user_profile`, `create_faculty_invitation`)
+  - Policies: 12 (enforcing zero-bypass RLS)
+  - Triggers: 4 (immutable group lifecycle protection)
+  - Indexes: 10 (including case-insensitive name uniqueness `idx_groups_class_id_name_ci`)
+  - Constraints: 5 (including `unique_student_course_group`, `unique_assignment_group_submission`)
+  - Realtime Publications: 3 (`groups`, `group_members`, `group_submissions`)
 
 ---
 
-## 4. Test Suite Execution & Results
+## 4. Verification & Test Summary
 
-| Test Suite | Command | Result | Details |
+| Test Suite | Command | Result | Notes |
 | :--- | :--- | :--- | :--- |
-| **Production Build** | `npm run build` | **PASS** | 2175 modules bundled; built in 25.62s without errors |
-| **Preflight Validation** | `preflight_validation.sql` | **PASS** | Verified prerequisite tables and CSPRNG |
-| **Post-Migration Introspection** | `post_migration_verification.sql` | **PASS** | Verified 13 functions, 12 policies, column privileges, FKs, triggers, realtime |
-| **Messaging & Performance** | `node scripts/verify-messaging-and-performance.js` | **PASS** | Realtime sync, date formatting, and latency checks passed |
-| **Submissions & Uniqueness** | `node scripts/verify-submission-full.js` | **PASS** | Assignment creation, submission, and duplicate prevention verified |
-| **Baseline & Invariants Suite** | `node scripts/verify-round2-database-invariants.js` | **PASS** | Baseline record counts, CSPRNG 192-bit token generation, and frontend fallbacks verified |
+| **Vite Production Build** | `npm run build` | **PASS** | 2177 modules bundled in 24.67s, 0 errors |
+| **Full Submission Pipeline** | `node scripts/verify-submission-full.js` | **PASS** | Creation, student 1 submission, duplicate block, student 2 submission, teacher review |
+| **Round 2 Invariant Suite** | `node scripts/verify-round2-database-invariants.js` | **PASS** | Baseline table counts, 1,000 CSPRNG tokens, schema constraints, zero regressions |
 
 ---
 
-## 5. Current Blockers & Approvals Needed
+## 5. Next Steps
 
-- **Approvals Received:** Explicit approval to execute database migration, commit, push, and deploy.
-- **Current Blockers:** None.
-
----
-
-## 6. Next Autonomous Tasks
-
-1. Git commit and push all Round 2 code, tests, and migrations to GitHub.
-2. Verify live deployment on Vercel (`https://assignora-cyan.vercel.app/`).
-3. Provide final delivery report to Darshan.
+1. Commit and push the in-course group management and dual-list tracking features to GitHub `origin/main`.
+2. Perform end-to-end user review on Vercel preview/production.

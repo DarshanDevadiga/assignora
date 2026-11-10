@@ -57,11 +57,13 @@ import NotificationBadge from '../../components/common/NotificationBadge'
 import InviteStudentModal from '../../components/class/InviteStudentModal'
 import StudentProfileModal from '../../components/class/StudentProfileModal'
 import TwoStepSubmissionModal from '../../components/student/TwoStepSubmissionModal'
+import ClassGroupsTab from '../../components/class/ClassGroupsTab'
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: BookOpen },
   { id: 'assignments', label: 'Assignments', icon: ClipboardList },
-  { id: 'people', label: 'People', icon: Users },
+  { id: 'groups', label: 'Groups', icon: Users },
+  { id: 'people', label: 'People', icon: GraduationCap },
   { id: 'messages', label: 'Messages', icon: MessageSquare },
   { id: 'resources', label: 'Resources', icon: FolderOpen },
 ]
@@ -1538,6 +1540,19 @@ export default function ClassDetailPage() {
             )}
           </div>
         </div>
+      )}
+
+      {/* =========================================================================
+          TAB 8: GROUPS (Class-scoped Group Management)
+      ========================================================================= */}
+      {activeTab === 'groups' && (
+        <ClassGroupsTab
+          classId={classId}
+          className={currentClass?.name || 'Course'}
+          currentUser={user}
+          isTeacher={isTeacher}
+          onGroupChanged={refreshClassDetails}
+        />
       )}
 
       {/* =========================================================================

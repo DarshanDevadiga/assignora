@@ -130,6 +130,22 @@ export function AuthProvider({ children }) {
     return result
   }
 
+  const signUp = async (payload) => {
+    setError(null)
+    const result = await authService.signUp(payload)
+    if (result.session && result.user) {
+      setAuthUser(result.user)
+      setProfile(result.profile)
+      try {
+        localStorage.setItem(
+          CACHE_KEY,
+          JSON.stringify({ user: result.user, profile: result.profile })
+        )
+      } catch (e) {}
+    }
+    return result
+  }
+
   const signOut = async () => {
     setError(null)
     authService.clearProfileCache()
@@ -187,6 +203,7 @@ export function AuthProvider({ children }) {
     loading,
     error,
     signIn,
+    signUp,
     signOut,
     refreshProfile,
   }

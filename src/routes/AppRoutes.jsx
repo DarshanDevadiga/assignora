@@ -6,6 +6,7 @@ import RoleRoute from './RoleRoute'
 
 // Lazy load pages for fast initial page load and code splitting
 const Login = lazy(() => import('../pages/Login'))
+const Register = lazy(() => import('../pages/Register'))
 const AdminDashboard = lazy(() => import('../pages/admin/AdminDashboard'))
 const ClassesManagement = lazy(() => import('../pages/admin/ClassesManagement'))
 const StudentsManagement = lazy(() => import('../pages/admin/StudentsManagement'))
@@ -55,6 +56,18 @@ export default function AppRoutes({ user, loading, onLogout }) {
               <Navigate to={user.role === 'admin' ? '/admin' : '/student'} replace />
             ) : (
               <Login />
+            )
+          }
+        />
+
+        {/* Public Registration Route */}
+        <Route
+          path="/register"
+          element={
+            user ? (
+              <Navigate to={user.role === 'admin' ? '/admin' : '/student'} replace />
+            ) : (
+              <Register />
             )
           }
         />

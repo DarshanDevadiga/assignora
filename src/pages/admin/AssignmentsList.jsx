@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ClipboardList,
   Plus,
@@ -14,7 +14,9 @@ import {
   AlertCircle,
   Users,
   Eye,
-  ArrowRight
+  ArrowRight,
+  Layers,
+  Cloud
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { assignmentsService } from '../../services/assignments.service'
@@ -29,6 +31,7 @@ import ProgressBar from '../../components/common/ProgressBar'
 export default function AssignmentsList() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   const [assignments, setAssignments] = useState([])
   const [classes, setClasses] = useState([])
@@ -36,7 +39,7 @@ export default function AssignmentsList() {
 
   // Filters & Search
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedClassFilter, setSelectedClassFilter] = useState('all')
+  const [selectedClassFilter, setSelectedClassFilter] = useState(searchParams.get('classId') || 'all')
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('all')
   const [sortBy, setSortBy] = useState('newest')
 
@@ -48,6 +51,13 @@ export default function AssignmentsList() {
   useEffect(() => {
     loadAssignments()
   }, [user?.id])
+
+  useEffect(() => {
+    const classIdFromUrl = searchParams.get('classId')
+    if (classIdFromUrl) {
+      setSelectedClassFilter(classIdFromUrl)
+    }
+  }, [searchParams])
 
   async function loadAssignments() {
     if (!user?.id) return
@@ -247,6 +257,17 @@ export default function AssignmentsList() {
                       {assignment.classes?.name || 'Class'}
                     </Badge>
 
+                    {assignment.submission_type === 'group' ? (
+                      <Badge variant="primary" size="sm">
+                        <span className="flex items-center gap-1">
+                          <Layers className="w-3 h-3" />
+                          <span>Group</span>
+                        </span>
+                      </Badge>
+                    ) : (
+                      <Badge variant="neutral" size="sm">Individual</Badge>
+                    )}
+
                     {assignment.status === 'draft' ? (
                       <Badge variant="warning" size="sm">Draft</Badge>
                     ) : deadlineBadge ? (
@@ -291,6 +312,18 @@ export default function AssignmentsList() {
                       >
                         <ExternalLink className="w-3 h-3" />
                         Drive Link
+                      </a>
+                    )}
+
+                    {assignment.onedrive_link && (
+                      <a
+                        href={assignment.onedrive_link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-blue-600 hover:underline font-semibold"
+                      >
+                        <Cloud className="w-3 h-3" />
+                        OneDrive
                       </a>
                     )}
                   </div>

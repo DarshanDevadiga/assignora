@@ -20,6 +20,91 @@ export const authService = {
   },
 
   /**
+   * Register a new user with Supabase Auth and public.users profile
+   */
+  async signUp({ name, email, password, role = 'student', facultyInviteToken = null, studentId = null }) {
+    const cleanEmail = email.trim()
+    const cleanName = (name || '').trim()
+
+    // 1. Supabase Auth sign up
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: cleanEmail,
+      password,
+      options: {
+        data: {
+          name: cleanName,
+          role,
+        },
+      },
+    })
+
+    if (authError) {
+      throw authError
+    }
+
+    if (!authData.user) {
+      throw new Error('Registration failed. No user was returned.')
+    }
+
+    const userId = authData.user.id
+    let profile = null
+
+    // 2. Profile Creation via RPC
+    try {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('register_user_profile', {
+        p_name: cleanName,
+        p_role: role,
+        p_faculty_invite_token: facultyInviteToken ? facultyInviteToken.trim() : null,
+        p_student_id: studentId ? studentId.trim() : null,
+      })
+
+      if (!rpcError && rpcData?.success) {
+        profile = rpcData.profile
+      }
+    } catch (rpcErr) {
+      console.warn('[authService] register_user_profile RPC error:', rpcErr)
+    }
+
+    // 3. Fallback direct insert if RPC not present yet
+    if (!profile) {
+      try {
+        const { data: insertedProfile } = await supabase
+          .from('users')
+          .insert({
+            id: userId,
+            name: cleanName,
+            email: cleanEmail,
+            role,
+            student_id: role === 'student' ? (studentId?.trim() || '') : '',
+          })
+          .select()
+          .maybeSingle()
+
+        if (insertedProfile) {
+          profile = insertedProfile
+        }
+      } catch (insertErr) {
+        console.warn('[authService] Direct profile insert error:', insertErr)
+      }
+    }
+
+    const finalProfile = profile || {
+      id: userId,
+      name: cleanName,
+      email: cleanEmail,
+      role,
+    }
+
+    profileCache.set(userId, { profile: finalProfile, timestamp: Date.now() })
+
+    return {
+      user: authData.user,
+      session: authData.session,
+      profile: finalProfile,
+    }
+  },
+
+  /**
    * Sign in with email and password
    */
   async signIn(email, password) {

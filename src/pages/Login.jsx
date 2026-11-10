@@ -286,6 +286,37 @@ export default function Login() {
                 </div>
               </div>
 
+              {/* Quick Demo Credentials for Evaluators */}
+              <div className="pt-2">
+                <div className="text-[11px] font-bold text-brand-muted uppercase tracking-wider text-center mb-2">
+                  Quick Demo Accounts
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('admin@assignora.demo')
+                      setPassword('admin123')
+                      setErrorMessage('')
+                    }}
+                    className="p-2 rounded-xl border border-brand-border/60 bg-brand-light/40 hover:bg-brand-light text-brand-primary text-xs font-semibold text-center transition-colors cursor-pointer"
+                  >
+                    Professor Demo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('student@assignora.demo')
+                      setPassword('student123')
+                      setErrorMessage('')
+                    }}
+                    className="p-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold text-center transition-colors cursor-pointer"
+                  >
+                    Student Demo
+                  </button>
+                </div>
+              </div>
+
               {/* Submit Button */}
               <Button
                 type="submit"
@@ -299,12 +330,18 @@ export default function Login() {
               </Button>
             </form>
 
-            <div className="mt-6 pt-5 border-t border-brand-line/60 text-center">
-              <p className="text-xs text-brand-muted">
-                Need an account or class access?{' '}
-                <span className="font-medium text-brand-heading">
-                  Contact your instructor or school administrator
-                </span>
+            <div className="mt-6 pt-5 border-t border-brand-line/60 text-center space-y-2">
+              <p className="text-xs sm:text-sm text-brand-muted">
+                Don't have an account yet?{' '}
+                <Link
+                  to="/register"
+                  className="font-semibold text-brand-primary hover:text-brand-hover transition-colors"
+                >
+                  Create an account
+                </Link>
+              </p>
+              <p className="text-[11px] text-slate-400">
+                Course enrollments are managed directly by class codes or invitations.
               </p>
             </div>
           </div>

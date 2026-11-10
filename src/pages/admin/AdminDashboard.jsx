@@ -272,6 +272,71 @@ export default function AdminDashboard() {
         />
       </div>
 
+      {/* Courses Taught Cards Grid (Clicking one opens that course's Assignments page) */}
+      {classes.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-brand-heading flex items-center gap-2">
+              <Laptop className="w-5 h-5 text-brand-primary" />
+              <span>Courses Taught ({classes.length})</span>
+            </h2>
+            <Button
+              variant="outline"
+              size="sm"
+              icon={Plus}
+              onClick={() => setIsCreateClassModalOpen(true)}
+              className="text-xs"
+            >
+              New Course
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {classes.map((cls) => {
+              const classAssignments = assignments.filter((a) => a.class_id === cls.id)
+              const studentsCount = cls.class_members?.length || 0
+              return (
+                <div
+                  key={cls.id}
+                  onClick={() => navigate(`/admin/assignments?classId=${cls.id}`)}
+                  className={`group p-5 rounded-2xl bg-white border shadow-card hover:shadow-card-hover transition-all cursor-pointer flex flex-col justify-between space-y-3 ${
+                    selectedClass?.id === cls.id
+                      ? 'border-brand-primary/80 ring-2 ring-brand-primary/10'
+                      : 'border-brand-line hover:border-brand-primary/50'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-brand-primary bg-brand-light px-2.5 py-0.5 rounded-full inline-block">
+                        {cls.subject || 'Course'}
+                      </span>
+                      {classUnreadCounts[cls.id] > 0 && (
+                        <NotificationBadge count={classUnreadCounts[cls.id]} />
+                      )}
+                    </div>
+                    <h3 className="font-bold text-base text-brand-heading mt-2 group-hover:text-brand-primary transition-colors line-clamp-1">
+                      {cls.name}
+                    </h3>
+                    <p className="text-xs text-brand-muted mt-1 flex items-center gap-3">
+                      <span>{studentsCount} Students</span>
+                      <span>•</span>
+                      <span>{classAssignments.length} Assignments</span>
+                    </p>
+                  </div>
+
+                  <div className="pt-3 border-t border-brand-line/60 flex items-center justify-between text-xs">
+                    <span className="text-brand-primary font-semibold group-hover:underline flex items-center gap-1">
+                      <span>View Course Assignments</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Main Grid: Left Stream/Banner + Right Controls */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         

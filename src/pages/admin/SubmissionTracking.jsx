@@ -15,11 +15,15 @@ import {
   AlertCircle,
   FileText,
   Award,
-  ChevronDown
+  ChevronDown,
+  Layers,
+  Cloud,
+  Crown
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { assignmentsService } from '../../services/assignments.service'
 import { submissionsService } from '../../services/submissions.service'
+import { groupsService } from '../../services/groups.service'
 import { notificationsService } from '../../services/notifications.service'
 import { messagesService } from '../../services/messages.service'
 import {
@@ -48,6 +52,7 @@ export default function SubmissionTracking() {
     paramAssignmentId || searchParams.get('id') || ''
   )
   const [currentAssignment, setCurrentAssignment] = useState(null)
+  const [courseGroups, setCourseGroups] = useState([])
   const [loading, setLoading] = useState(true)
 
   // Filtering, Search & Sort
@@ -104,6 +109,10 @@ export default function SubmissionTracking() {
     try {
       const details = await assignmentsService.getAssignmentById(id)
       setCurrentAssignment(details)
+      if (details?.class_id) {
+        const grps = await groupsService.getCourseGroups(details.class_id)
+        setCourseGroups(grps)
+      }
     } catch (err) {
       console.error('[SubmissionTracking] Error loading assignment details:', err)
     }
@@ -443,12 +452,16 @@ export default function SubmissionTracking() {
                     <span className="font-semibold text-brand-primary">
                       {currentAssignment.points} Total Points
                     </span>
+                    <span>•</span>
+                    <Badge variant={currentAssignment.submission_type === 'group' ? 'primary' : 'neutral'} size="sm">
+                      {currentAssignment.submission_type === 'group' ? 'Group Assignment' : 'Individual Assignment'}
+                    </Badge>
                   </p>
                 </div>
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
                 <Button
                   variant="outline"
                   size="sm"
@@ -465,7 +478,18 @@ export default function SubmissionTracking() {
                     className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-primary bg-brand-light hover:bg-brand-border/60 px-3 py-2 rounded-btn"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Reference Drive</span>
+                    <span>Google Drive</span>
+                  </a>
+                )}
+                {currentAssignment.onedrive_link && (
+                  <a
+                    href={currentAssignment.onedrive_link}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100/60 px-3 py-2 rounded-btn"
+                  >
+                    <Cloud className="w-3.5 h-3.5 text-blue-600" />
+                    <span>OneDrive</span>
                   </a>
                 )}
               </div>

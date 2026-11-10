@@ -185,7 +185,7 @@ export default function TwoStepSubmissionModal({
               className="w-1/2 justify-center shadow-purple-glow font-semibold"
               onClick={handleStepOneConfirm}
             >
-              Yes, Continue
+              Confirm Submission
             </Button>
           </div>
         </div>

@@ -20,7 +20,10 @@ import {
   AlignLeft,
   Upload,
   CheckCircle2,
-  Sparkles
+  Sparkles,
+  Cloud,
+  Layers,
+  UserCheck
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { classesService } from '../../services/classes.service'
@@ -46,14 +49,18 @@ export default function CreateAssignment() {
   const [dueDate, setDueDate] = useState('')
   const [dueTime, setDueTime] = useState('23:59')
   const [points, setPoints] = useState('100')
+  const [submissionType, setSubmissionType] = useState('individual')
   const [driveLink, setDriveLink] = useState('')
   const [driveLinkTitle, setDriveLinkTitle] = useState('Reference Materials – Google Drive')
+  const [onedriveLink, setOnedriveLink] = useState('')
   const [requireSubmission, setRequireSubmission] = useState(true)
   const [twoStepSubmission, setTwoStepSubmission] = useState(true)
 
-  // Link addition dialog state
+  // Link addition dialog states
   const [showAddLink, setShowAddLink] = useState(false)
   const [tempLink, setTempLink] = useState('')
+  const [showAddOneDrive, setShowAddOneDrive] = useState(false)
+  const [tempOneDrive, setTempOneDrive] = useState('')
 
   // Student selection modal state
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false)
@@ -89,6 +96,8 @@ export default function CreateAssignment() {
           setDueTime(existing.due_time ? existing.due_time.substring(0, 5) : '23:59')
           setPoints(String(existing.points || 100))
           setDriveLink(existing.drive_link || '')
+          setOnedriveLink(existing.onedrive_link || '')
+          setSubmissionType(existing.submission_type || 'individual')
           setAssignToAll(existing.assign_to_all)
           if (!existing.assign_to_all && existing.assignment_students) {
             setSelectedStudentIds(existing.assignment_students.map((s) => s.student_id))
@@ -125,6 +134,15 @@ export default function CreateAssignment() {
     }
   }
 
+  // Handle Add OneDrive Link
+  const handleSaveOneDriveLink = () => {
+    if (tempOneDrive.trim()) {
+      setOnedriveLink(tempOneDrive.trim())
+      setTempOneDrive('')
+      setShowAddOneDrive(false)
+    }
+  }
+
   // Submit Assignment
   const handleSaveAssignment = async (status = 'published') => {
     if (!title.trim()) {
@@ -153,6 +171,8 @@ export default function CreateAssignment() {
         due_time: dueTime ? `${dueTime}:00` : '23:59:00',
         points: Number(points) || 100,
         drive_link: driveLink || null,
+        onedrive_link: onedriveLink || null,
+        submission_type: submissionType || 'individual',
         assign_to_all: assignToAll,
         status,
       }
@@ -369,6 +389,48 @@ export default function CreateAssignment() {
               </div>
             ) : null}
 
+            {/* Existing / added OneDrive Link */}
+            {onedriveLink ? (
+              <div className="p-3.5 rounded-xl border border-blue-200 bg-blue-50/40 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-lg bg-white border border-blue-200 flex items-center justify-center shrink-0 shadow-xs">
+                    <Cloud className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs sm:text-sm font-semibold text-brand-heading truncate">
+                      Microsoft OneDrive Cloud Materials
+                    </p>
+                    <a
+                      href={onedriveLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[11px] text-blue-600 hover:underline truncate block"
+                    >
+                      {onedriveLink}
+                    </a>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <a
+                    href={onedriveLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-white"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setOnedriveLink('')}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-brand-danger hover:bg-rose-50"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             {/* Static PDF sample resource from reference */}
             <div className="p-3.5 rounded-xl border border-brand-line bg-slate-50/70 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
@@ -385,11 +447,11 @@ export default function CreateAssignment() {
               <Badge variant="neutral" size="sm">Attachment</Badge>
             </div>
 
-            {/* Add Link Input dialog */}
-            {showAddLink ? (
+            {/* Add Google Drive Link dialog */}
+            {showAddLink && (
               <div className="p-3.5 rounded-xl border border-brand-primary bg-brand-light/30 space-y-3">
                 <Input
-                  label="Google Drive or External URL"
+                  label="Google Drive or Resource URL"
                   placeholder="https://drive.google.com/drive/folders/..."
                   value={tempLink}
                   onChange={(e) => setTempLink(e.target.value)}
@@ -408,30 +470,74 @@ export default function CreateAssignment() {
                     size="sm"
                     onClick={handleSaveDriveLink}
                   >
-                    Save Link
+                    Save Drive Link
                   </Button>
                 </div>
               </div>
-            ) : (
-              <div className="flex items-center gap-3 pt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  icon={Link2}
-                  onClick={() => setShowAddLink(true)}
-                >
-                  Add Link
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  icon={Upload}
-                  onClick={() => alert('PDF attachment added from workspace guidelines.')}
-                >
-                  Upload File
-                </Button>
+            )}
+
+            {/* Add OneDrive Link dialog */}
+            {showAddOneDrive && (
+              <div className="p-3.5 rounded-xl border border-blue-500 bg-blue-50/40 space-y-3">
+                <Input
+                  label="Microsoft OneDrive URL"
+                  placeholder="https://1drv.ms/f/s!..."
+                  value={tempOneDrive}
+                  onChange={(e) => setTempOneDrive(e.target.value)}
+                  autoFocus
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowAddOneDrive(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleSaveOneDriveLink}
+                  >
+                    Save OneDrive Link
+                  </Button>
+                </div>
               </div>
             )}
+
+            {/* Resource Buttons */}
+            <div className="flex items-center gap-2.5 flex-wrap pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                icon={Link2}
+                onClick={() => {
+                  setShowAddLink(true)
+                  setShowAddOneDrive(false)
+                }}
+              >
+                Add Drive Link
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                icon={Cloud}
+                onClick={() => {
+                  setShowAddOneDrive(true)
+                  setShowAddLink(false)
+                }}
+              >
+                Add OneDrive Link
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                icon={Upload}
+                onClick={() => alert('PDF attachment added from workspace guidelines.')}
+              >
+                Upload File
+              </Button>
+            </div>
           </Card>
 
         </div>
@@ -536,6 +642,45 @@ export default function CreateAssignment() {
               <Calendar className="w-5 h-5 text-brand-primary" />
               <span>Assignment Settings</span>
             </h3>
+
+            {/* Submission Type (Individual vs Group) */}
+            <div className="space-y-2">
+              <label className="block text-xs font-semibold text-brand-heading">
+                Submission Type <span className="text-brand-danger">*</span>
+              </label>
+              <div className="grid grid-cols-2 gap-2.5 p-1 bg-slate-100/90 rounded-xl border border-brand-line/60">
+                <button
+                  type="button"
+                  onClick={() => setSubmissionType('individual')}
+                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    submissionType === 'individual'
+                      ? 'bg-white text-brand-primary shadow-xs border border-brand-line/50'
+                      : 'text-slate-600 hover:text-brand-heading'
+                  }`}
+                >
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>Individual</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSubmissionType('group')}
+                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    submissionType === 'group'
+                      ? 'bg-white text-brand-primary shadow-xs border border-brand-line/50'
+                      : 'text-slate-600 hover:text-brand-heading'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>Group</span>
+                </button>
+              </div>
+              <p className="text-[11px] text-brand-muted">
+                {submissionType === 'individual'
+                  ? 'Each student acknowledges and submits their own individual work.'
+                  : 'Students collaborate in course groups. Only the group leader submits on behalf of the group.'}
+              </p>
+            </div>
 
             {/* Due Date & Time */}
             <div className="grid grid-cols-2 gap-3">

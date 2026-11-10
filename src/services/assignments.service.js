@@ -93,22 +93,39 @@ export const assignmentsService = {
    * Defensive non-transactional rollback on partial failure
    */
   async createAssignment(assignmentData, selectedStudentIds = []) {
-    const { data: newAssignment, error: aErr } = await supabase
-      .from('assignments')
-      .insert({
-        title: assignmentData.title.trim(),
-        description: assignmentData.description?.trim() || '',
-        class_id: assignmentData.class_id,
-        admin_id: assignmentData.admin_id,
-        due_date: assignmentData.due_date,
-        due_time: assignmentData.due_time || '23:59:00',
-        drive_link: assignmentData.drive_link?.trim() || null,
-        points: Number(assignmentData.points) || 100,
-        assign_to_all: assignmentData.assign_to_all ?? true,
-        status: assignmentData.status || 'published',
-      })
-      .select()
-      .single()
+    const payload = {
+      title: assignmentData.title.trim(),
+      description: assignmentData.description?.trim() || '',
+      class_id: assignmentData.class_id,
+      admin_id: assignmentData.admin_id,
+      due_date: assignmentData.due_date,
+      due_time: assignmentData.due_time || '23:59:00',
+      drive_link: assignmentData.drive_link?.trim() || null,
+      onedrive_link: assignmentData.onedrive_link?.trim() || null,
+      submission_type: assignmentData.submission_type || 'individual',
+      points: Number(assignmentData.points) || 100,
+      assign_to_all: assignmentData.assign_to_all ?? true,
+      status: assignmentData.status || 'published',
+    }
+
+    let newAssignment = null
+    let aErr = null
+
+    // Attempt insert with Round 2 columns
+    const res1 = await supabase.from('assignments').insert(payload).select().single()
+    newAssignment = res1.data
+    aErr = res1.error
+
+    // If live schema does not yet have submission_type or onedrive_link, fallback safely
+    if (aErr && (aErr.message?.includes('submission_type') || aErr.message?.includes('onedrive_link'))) {
+      console.warn('[assignmentsService] Schema missing Round 2 columns, retrying with baseline schema:', aErr.message)
+      const basePayload = { ...payload }
+      delete basePayload.submission_type
+      delete basePayload.onedrive_link
+      const res2 = await supabase.from('assignments').insert(basePayload).select().single()
+      newAssignment = res2.data
+      aErr = res2.error
+    }
 
     if (aErr) {
       console.error('[assignmentsService] Error creating assignment:', aErr)
@@ -141,23 +158,48 @@ export const assignmentsService = {
    * Update an assignment and update student allocations if specified
    */
   async updateAssignment(assignmentId, updates, selectedStudentIds = null) {
-    const { data, error } = await supabase
+    const updatePayload = {
+      title: updates.title.trim(),
+      description: updates.description?.trim() || '',
+      class_id: updates.class_id,
+      due_date: updates.due_date,
+      due_time: updates.due_time || '23:59:00',
+      drive_link: updates.drive_link?.trim() || null,
+      onedrive_link: updates.onedrive_link?.trim() || null,
+      submission_type: updates.submission_type || 'individual',
+      points: Number(updates.points) || 100,
+      assign_to_all: updates.assign_to_all ?? true,
+      status: updates.status || 'published',
+      updated_at: new Date().toISOString(),
+    }
+
+    let data = null
+    let error = null
+
+    const res1 = await supabase
       .from('assignments')
-      .update({
-        title: updates.title.trim(),
-        description: updates.description?.trim() || '',
-        class_id: updates.class_id,
-        due_date: updates.due_date,
-        due_time: updates.due_time || '23:59:00',
-        drive_link: updates.drive_link?.trim() || null,
-        points: Number(updates.points) || 100,
-        assign_to_all: updates.assign_to_all ?? true,
-        status: updates.status || 'published',
-        updated_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq('id', assignmentId)
       .select()
       .single()
+
+    data = res1.data
+    error = res1.error
+
+    if (error && (error.message?.includes('submission_type') || error.message?.includes('onedrive_link'))) {
+      console.warn('[assignmentsService] Fallback update without Round 2 columns:', error.message)
+      const baseUpdates = { ...updatePayload }
+      delete baseUpdates.submission_type
+      delete baseUpdates.onedrive_link
+      const res2 = await supabase
+        .from('assignments')
+        .update(baseUpdates)
+        .eq('id', assignmentId)
+        .select()
+        .single()
+      data = res2.data
+      error = res2.error
+    }
 
     if (error) {
       console.error('[assignmentsService] Error updating assignment:', error)

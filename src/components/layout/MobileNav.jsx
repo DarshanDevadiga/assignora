@@ -6,7 +6,6 @@ export default function MobileNav({ role = 'admin', onOpenMenu }) {
   const items = role === 'admin' ? [
     { label: 'Home', path: '/admin', icon: Home, end: true },
     { label: 'Classes', path: '/admin/classes', icon: BookOpen },
-    { label: 'Assignments', path: '/admin/assignments', icon: ClipboardList },
     { label: 'Students', path: '/admin/students', icon: Users },
   ] : [
     { label: 'Home', path: '/student', icon: Home, end: true },

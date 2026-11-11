@@ -6,40 +6,96 @@ const memoryStore = new Map()
 const busListeners = new Set()
 
 /**
- * Deduplicate and append a message by its unique database ID
- * Guarantees that duplicate inserts, re-renders, or concurrent realtime events
- * never add the same message ID more than once.
+ * Robust message reconciliation and deduplication engine.
+ * Guarantees that:
+ * 1. Duplicate database message IDs are never appended twice.
+ * 2. Optimistic temporary messages (e.g. `opt-*` or `temp-*`) are reconciled and replaced
+ *    by the canonical persisted database record once it arrives via RPC return or Realtime event.
+ * 3. Concurrent fetch and Realtime events are merged safely without duplicate rows.
+ * 4. Chronological sort order by created_at is strictly preserved.
  */
-export function addMessageOnce(previousMessages = [], newMessage) {
-  if (!newMessage || !newMessage.id) return previousMessages
-  const exists = previousMessages.some((m) => m.id === newMessage.id)
-  if (exists) return previousMessages
-  return [...previousMessages, newMessage]
+export function reconcileAndDeduplicateMessages(previousMessages = [], incoming = []) {
+  const incomingArr = Array.isArray(incoming) ? incoming : [incoming].filter(Boolean)
+  if (incomingArr.length === 0) return previousMessages
+
+  const map = new Map()
+
+  // 1. Seed existing messages by ID
+  for (const m of previousMessages) {
+    if (m?.id) {
+      map.set(String(m.id), m)
+    }
+  }
+
+  // 2. Reconcile and merge incoming messages
+  for (const inc of incomingArr) {
+    if (!inc || !inc.id) continue
+    const incId = String(inc.id)
+
+    // Check if incoming is a persisted canonical DB ID
+    const isPersisted = !incId.startsWith('opt-') && !incId.startsWith('temp-') && !incId.startsWith('msg-')
+
+    if (isPersisted) {
+      // Look for a matching temporary optimistic message (same senderId and same text within 30s)
+      let matchedTempId = null
+      for (const [key, existing] of map.entries()) {
+        const isExistingTemp = key.startsWith('opt-') || key.startsWith('temp-') || key.startsWith('msg-')
+        if (
+          isExistingTemp &&
+          existing.senderId === inc.senderId &&
+          existing.text?.trim() === inc.text?.trim()
+        ) {
+          const tExisting = new Date(existing.createdAt || existing.created_at || Date.now()).getTime()
+          const tInc = new Date(inc.createdAt || inc.created_at || Date.now()).getTime()
+          if (Math.abs(tExisting - tInc) < 30000) {
+            matchedTempId = key
+            break
+          }
+        }
+      }
+
+      if (matchedTempId) {
+        map.delete(matchedTempId) // safely remove the transient optimistic message
+      }
+    }
+
+    // Merge or insert incoming record
+    const existing = map.get(incId)
+    if (existing) {
+      map.set(incId, {
+        ...existing,
+        ...inc,
+        senderName:
+          inc.senderName && inc.senderName !== 'Member' && inc.senderName !== 'Class Member'
+            ? inc.senderName
+            : existing.senderName || inc.senderName || 'Member',
+        senderAvatar: inc.senderAvatar || existing.senderAvatar || null,
+        senderRole: inc.senderRole || existing.senderRole || 'student',
+      })
+    } else {
+      map.set(incId, inc)
+    }
+  }
+
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(a.createdAt || a.created_at) - new Date(b.createdAt || b.created_at)
+  )
 }
 
 /**
- * Add a new message or update existing message by ID,
- * ensuring richer metadata (e.g. sender name/avatar from broadcast) replaces partial DB payloads
+ * Deduplicate and append a message by its unique database ID
+ */
+export function addMessageOnce(previousMessages = [], newMessage) {
+  if (!newMessage || !newMessage.id) return previousMessages
+  return reconcileAndDeduplicateMessages(previousMessages, [newMessage])
+}
+
+/**
+ * Add a new message or update existing message by ID
  */
 export function addOrUpdateMessage(previousMessages = [], newMessage) {
   if (!newMessage || !newMessage.id) return previousMessages
-  const index = previousMessages.findIndex((m) => m.id === newMessage.id)
-  if (index === -1) {
-    return [...previousMessages, newMessage]
-  }
-  const updated = [...previousMessages]
-  const existing = updated[index]
-  updated[index] = {
-    ...existing,
-    ...newMessage,
-    senderName:
-      newMessage.senderName && newMessage.senderName !== 'Class Member'
-        ? newMessage.senderName
-        : existing.senderName || newMessage.senderName || 'Class Member',
-    senderAvatar: newMessage.senderAvatar || existing.senderAvatar || null,
-    senderRole: newMessage.senderRole || existing.senderRole || 'student',
-  }
-  return updated
+  return reconcileAndDeduplicateMessages(previousMessages, [newMessage])
 }
 
 /**
@@ -47,16 +103,7 @@ export function addOrUpdateMessage(previousMessages = [], newMessage) {
  * preserving chronological order by created_at
  */
 export function mergeMessages(previousMessages = [], incomingMessages = []) {
-  const map = new Map()
-  for (const m of previousMessages) {
-    if (m?.id) map.set(m.id, m)
-  }
-  for (const m of incomingMessages) {
-    if (m?.id) map.set(m.id, m)
-  }
-  return Array.from(map.values()).sort(
-    (a, b) => new Date(a.createdAt || a.created_at) - new Date(b.createdAt || b.created_at)
-  )
+  return reconcileAndDeduplicateMessages(previousMessages, incomingMessages)
 }
 
 export const messagesService = {

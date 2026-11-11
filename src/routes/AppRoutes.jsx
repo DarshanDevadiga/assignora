@@ -20,6 +20,7 @@ const AssignmentDetails = lazy(() => import('../pages/student/AssignmentDetails'
 const StudentSubmissions = lazy(() => import('../pages/student/StudentSubmissions'))
 const StudentAnnouncements = lazy(() => import('../pages/student/StudentAnnouncements'))
 const ClassDetailPage = lazy(() => import('../pages/shared/ClassDetailPage'))
+const GroupDetailsPage = lazy(() => import('../pages/shared/GroupDetailsPage'))
 const SettingsPage = lazy(() => import('../pages/shared/SettingsPage'))
 const ProfilePage = lazy(() => import('../pages/shared/ProfilePage'))
 const JoinClassPage = lazy(() => import('../pages/shared/JoinClassPage'))
@@ -103,6 +104,7 @@ export default function AppRoutes({ user, loading, onLogout }) {
           <Route path="classes" element={<ClassesManagement />} />
           <Route path="classes/:id" element={<ClassDetailPage />} />
           <Route path="classes/:id/people" element={<ClassDetailPage />} />
+          <Route path="classes/:classId/groups/:groupId" element={<GroupDetailsPage />} />
           <Route path="assignments" element={<AssignmentsList />} />
           <Route path="assignments/create" element={<CreateAssignment />} />
           <Route path="assignments/:id/edit" element={<CreateAssignment />} />
@@ -131,6 +133,7 @@ export default function AppRoutes({ user, loading, onLogout }) {
           <Route path="classes" element={<ClassesManagement />} />
           <Route path="classes/:id" element={<ClassDetailPage />} />
           <Route path="classes/:id/people" element={<ClassDetailPage />} />
+          <Route path="classes/:classId/groups/:groupId" element={<GroupDetailsPage />} />
           <Route path="assignments" element={<StudentDashboard />} />
           <Route path="assignments/:id" element={<AssignmentDetails />} />
           <Route path="submissions" element={<StudentSubmissions />} />
@@ -138,6 +141,18 @@ export default function AppRoutes({ user, loading, onLogout }) {
           <Route path="announcements" element={<StudentAnnouncements />} />
           <Route path="profile" element={<ProfilePage />} />
           <Route path="settings" element={<SettingsPage />} />
+        </Route>
+
+        {/* Direct /classes/:classId/groups/:groupId Route */}
+        <Route
+          path="/classes/:classId/groups/:groupId"
+          element={
+            <ProtectedRoute user={user} loading={loading}>
+              <DashboardLayout user={user} role={user?.role || 'student'} onLogout={onLogout} />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<GroupDetailsPage />} />
         </Route>
 
         {/* Explicit 404 Route */}

@@ -545,6 +545,18 @@ SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $$
 BEGIN
+    -- Group deletion check must run first on DELETE operations
+    IF TG_OP = 'DELETE' THEN
+        IF EXISTS (SELECT 1 FROM public.group_submissions WHERE group_id = OLD.id) THEN
+            RAISE EXCEPTION 'Cannot delete group with existing submission records. Group must be archived instead.';
+        END IF;
+        IF current_setting('assignora.authorized_group_deletion', true) IS DISTINCT FROM 'on' THEN
+            RAISE EXCEPTION 'Direct group deletion is forbidden. Use disband_course_group RPC.';
+        END IF;
+        RETURN OLD;
+    END IF;
+
+    -- Below this, TG_OP = 'UPDATE'
     IF NEW.id <> OLD.id OR NEW.class_id <> OLD.class_id OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
         RAISE EXCEPTION 'Group id, class_id, and created_at cannot be modified.';
     END IF;
@@ -576,17 +588,6 @@ BEGIN
         ELSE
             RAISE EXCEPTION 'Invalid group status transition.';
         END IF;
-    END IF;
-
-    -- Group deletion is forbidden if group has recorded submissions
-    IF TG_OP = 'DELETE' THEN
-        IF EXISTS (SELECT 1 FROM public.group_submissions WHERE group_id = OLD.id) THEN
-            RAISE EXCEPTION 'Cannot delete group with existing submission records. Group must be archived instead.';
-        END IF;
-        IF current_setting('assignora.authorized_group_deletion', true) IS DISTINCT FROM 'on' THEN
-            RAISE EXCEPTION 'Direct group deletion is forbidden. Use disband_course_group RPC.';
-        END IF;
-        RETURN OLD;
     END IF;
 
     RETURN NEW;
@@ -624,13 +625,23 @@ AS $$
 DECLARE
     v_group RECORD;
 BEGIN
+    -- If group is being deleted via authorized disband_course_group, bypass member checks
+    IF current_setting('assignora.authorized_group_deletion', true) = 'on' THEN
+        RETURN OLD;
+    END IF;
+
     SELECT id, leader_id, status INTO v_group FROM public.groups WHERE id = OLD.group_id;
 
-    IF v_group.id IS NOT NULL AND v_group.status = 'archived' THEN
+    -- If group was already deleted or not found, allow cascaded deletion
+    IF v_group.id IS NULL THEN
+        RETURN OLD;
+    END IF;
+
+    IF v_group.status = 'archived' THEN
         RAISE EXCEPTION 'Cannot modify or remove members from an archived group. Roster is permanently preserved.';
     END IF;
 
-    IF v_group.id IS NOT NULL AND v_group.leader_id = OLD.student_id THEN
+    IF v_group.leader_id = OLD.student_id THEN
         RAISE EXCEPTION 'Group leader cannot leave or be removed without transferring leadership first.';
     END IF;
 

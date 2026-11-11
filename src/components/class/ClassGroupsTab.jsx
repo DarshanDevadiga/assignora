@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Users,
   Plus,
@@ -12,7 +13,8 @@ import {
   Shield,
   Layers,
   Sparkles,
-  ArrowRight
+  ArrowRight,
+  RefreshCw
 } from 'lucide-react'
 import Card from '../common/Card'
 import Button from '../common/Button'
@@ -20,6 +22,7 @@ import Badge from '../common/Badge'
 import { Input } from '../common/Input'
 import GroupManagementModal from '../group/GroupManagementModal'
 import GroupDetailsModal from '../group/GroupDetailsModal'
+import ProfessorCreateGroupModal from '../group/ProfessorCreateGroupModal'
 import { groupsService } from '../../services/groups.service'
 
 export default function ClassGroupsTab({
@@ -29,43 +32,105 @@ export default function ClassGroupsTab({
   isTeacher = false,
   onGroupChanged
 }) {
+  const navigate = useNavigate()
+  const rolePrefix = currentUser?.role === 'admin' ? '/admin' : '/student'
+
   const [groups, setGroups] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGroupForDetails, setSelectedGroupForDetails] = useState(null)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
+  const [isProfessorCreateOpen, setIsProfessorCreateOpen] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [feedback, setFeedback] = useState({ type: '', text: '' })
 
+  // Explicit 4-state membership machine: 'loading' | 'member' | 'not_member' | 'error'
+  const [membershipState, setMembershipState] = useState('loading')
+  const [membershipGroup, setMembershipGroup] = useState(null)
+  const [membershipError, setMembershipError] = useState(null)
+
   const isStudent = currentUser?.role === 'student' || !isTeacher
 
-  useEffect(() => {
-    loadGroups()
-  }, [classId])
-
-  async function loadGroups() {
+  const loadData = useCallback(async () => {
     if (!classId) return
+    setLoading(true)
+    if (isStudent && currentUser?.id) {
+      setMembershipState('loading')
+      setMembershipError(null)
+    }
+
     try {
-      setLoading(true)
-      const list = await groupsService.getCourseGroups(classId)
-      setGroups(list)
+      // Concurrently query course groups and the student's authoritative membership
+      const [groupsResult, memberResult] = await Promise.allSettled([
+        groupsService.getCourseGroups(classId),
+        isStudent && currentUser?.id
+          ? groupsService.getStudentGroupInCourse(classId, currentUser.id)
+          : Promise.resolve(null)
+      ])
+
+      // Handle course groups
+      if (groupsResult.status === 'fulfilled') {
+        setGroups(groupsResult.value || [])
+      } else {
+        console.error('[ClassGroupsTab] Error loading groups:', groupsResult.reason)
+        setGroups([])
+      }
+
+      // Handle membership state authoritatively
+      if (isStudent && currentUser?.id) {
+        if (memberResult.status === 'fulfilled') {
+          const activeGroup = memberResult.value
+          if (activeGroup && activeGroup.id) {
+            setMembershipGroup(activeGroup)
+            setMembershipState('member')
+          } else {
+            // Also cross-verify with groupsResult in case of edge latency
+            const matchedInList = (groupsResult.value || []).find((g) => {
+              if (g.leader_id === currentUser.id) return true
+              return (g.members || []).some(
+                (m) => (m.student_id || m.user?.id) === currentUser.id
+              )
+            })
+            if (matchedInList) {
+              setMembershipGroup(matchedInList)
+              setMembershipState('member')
+            } else {
+              setMembershipGroup(null)
+              setMembershipState('not_member')
+            }
+          }
+        } else {
+          console.error('[ClassGroupsTab] Membership query error:', memberResult.reason)
+          setMembershipError(memberResult.reason?.message || 'Failed to verify group membership.')
+          setMembershipState('error')
+        }
+      } else {
+        setMembershipState('not_member')
+      }
     } catch (err) {
-      console.error('[ClassGroupsTab] Error loading groups:', err)
+      console.error('[ClassGroupsTab] Unexpected error during loadData:', err)
+      setMembershipState('error')
+      setMembershipError(err.message || 'Failed to load group data.')
     } finally {
       setLoading(false)
     }
-  }
+  }, [classId, isStudent, currentUser?.id])
 
-  // Determine which group the current user belongs to (if any)
+  useEffect(() => {
+    loadData()
+  }, [loadData])
+
+  // Backward-compatible fallback derivation
   const myGroup = useMemo(() => {
+    if (membershipGroup) return membershipGroup
     if (!currentUser?.id) return null
     return groups.find((g) => {
       if (g.leader_id === currentUser.id) return true
       return (g.members || []).some((m) => (m.student_id || m.user?.id) === currentUser.id)
     })
-  }, [groups, currentUser?.id])
+  }, [membershipGroup, groups, currentUser?.id])
 
-  const isUserInAnyGroup = Boolean(myGroup)
+  const isUserInAnyGroup = membershipState === 'member' || Boolean(myGroup)
 
   // Filter groups by search query
   const filteredGroups = useMemo(() => {
@@ -81,6 +146,12 @@ export default function ClassGroupsTab({
     })
   }, [groups, searchQuery])
 
+  // Navigate to dedicated Group Details page
+  const handleOpenGroupDetails = (groupId) => {
+    if (!groupId) return
+    navigate(`${rolePrefix}/classes/${classId}/groups/${groupId}`)
+  }
+
   // Join action directly from card
   const handleJoinGroup = async (groupId, groupName) => {
     try {
@@ -88,7 +159,7 @@ export default function ClassGroupsTab({
       setFeedback({ type: '', text: '' })
       await groupsService.joinCourseGroup(groupId, currentUser?.id)
       setFeedback({ type: 'success', text: `Successfully joined "${groupName}"!` })
-      await loadGroups()
+      await loadData()
       if (onGroupChanged) onGroupChanged()
       if (selectedGroupForDetails) setSelectedGroupForDetails(null)
     } catch (err) {
@@ -99,7 +170,7 @@ export default function ClassGroupsTab({
   }
 
   const handleGroupUpdated = async () => {
-    await loadGroups()
+    await loadData()
     if (onGroupChanged) onGroupChanged()
   }
 
@@ -119,9 +190,42 @@ export default function ClassGroupsTab({
           </p>
         </div>
 
-        {isStudent && (
+        {isTeacher ? (
           <div className="flex items-center gap-2 shrink-0">
-            {!isUserInAnyGroup ? (
+            <Button
+              variant="primary"
+              size="md"
+              icon={Plus}
+              onClick={() => setIsProfessorCreateOpen(true)}
+              className="shadow-purple-glow font-bold cursor-pointer"
+            >
+              Create Group
+            </Button>
+          </div>
+        ) : isStudent ? (
+          <div className="flex items-center gap-2 shrink-0">
+            {membershipState === 'loading' ? (
+              <div className="h-10 w-32 rounded-xl bg-purple-100/70 animate-pulse border border-purple-200/50" />
+            ) : membershipState === 'member' ? (
+              <Button
+                variant="secondary"
+                size="md"
+                icon={Users}
+                onClick={() => handleOpenGroupDetails(myGroup?.id)}
+                className="cursor-pointer"
+              >
+                View My Group ({myGroup?.name})
+              </Button>
+            ) : membershipState === 'error' ? (
+              <button
+                type="button"
+                onClick={() => loadData()}
+                className="text-xs text-rose-600 hover:text-rose-700 underline font-medium flex items-center gap-1 cursor-pointer"
+              >
+                <AlertCircle className="w-3.5 h-3.5" />
+                <span>Retry</span>
+              </button>
+            ) : (
               <Button
                 variant="primary"
                 size="md"
@@ -131,19 +235,9 @@ export default function ClassGroupsTab({
               >
                 Create Group
               </Button>
-            ) : (
-              <Button
-                variant="secondary"
-                size="md"
-                icon={Users}
-                onClick={() => setSelectedGroupForDetails(myGroup)}
-                className="cursor-pointer"
-              >
-                View My Group ({myGroup.name})
-              </Button>
             )}
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Feedback Alert */}
@@ -173,8 +267,8 @@ export default function ClassGroupsTab({
         </div>
       )}
 
-      {/* Student Enrollment Status Notice */}
-      {isStudent && !isUserInAnyGroup && (
+      {/* Student Enrollment Status Notice (Only shown when verified not in any group; never during loading) */}
+      {isStudent && membershipState === 'not_member' && (
         <div className="p-4 rounded-xl bg-amber-50/80 border border-amber-200/80 text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg bg-amber-200/80 text-amber-800 flex items-center justify-center shrink-0">
@@ -196,6 +290,33 @@ export default function ClassGroupsTab({
             className="shrink-0 font-semibold cursor-pointer"
           >
             Create a Group
+          </Button>
+        </div>
+      )}
+
+      {/* Student Membership Error Notice (When DB fails, never assume not_member) */}
+      {isStudent && membershipState === 'error' && (
+        <div className="p-4 rounded-xl bg-rose-50/80 border border-rose-200/80 text-rose-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-rose-200/80 text-rose-800 flex items-center justify-center shrink-0">
+              <AlertCircle className="w-5 h-5 text-rose-700" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-rose-950">Unable to verify team membership.</p>
+              <p className="text-[11px] text-rose-800">
+                {membershipError || 'A network error occurred while querying your course group status.'}
+              </p>
+            </div>
+          </div>
+
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={RefreshCw}
+            onClick={() => loadData()}
+            className="shrink-0 font-semibold cursor-pointer"
+          >
+            Retry Verification
           </Button>
         </div>
       )}
@@ -235,7 +356,17 @@ export default function ClassGroupsTab({
               ? `No groups in this course matched "${searchQuery}". Try a different search term.`
               : `There are currently no project groups registered for ${className}. Students enrolled in this course can create the first team.`}
           </p>
-          {isStudent && !isUserInAnyGroup && !searchQuery && (
+          {isTeacher && !searchQuery ? (
+            <Button
+              variant="primary"
+              size="md"
+              icon={Plus}
+              onClick={() => setIsProfessorCreateOpen(true)}
+              className="mt-2 shadow-purple-glow font-bold cursor-pointer"
+            >
+              Create the First Group
+            </Button>
+          ) : isStudent && membershipState === 'not_member' && !searchQuery ? (
             <Button
               variant="primary"
               size="md"
@@ -245,7 +376,7 @@ export default function ClassGroupsTab({
             >
               Create the First Group
             </Button>
-          )}
+          ) : null}
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -253,7 +384,8 @@ export default function ClassGroupsTab({
             const members = g.members || []
             const isMyGroup = myGroup?.id === g.id
             const isLeader = g.leader_id === currentUser?.id
-            const canJoinThisGroup = isStudent && !isUserInAnyGroup
+            const isArchived = g.status === 'archived'
+            const canJoinThisGroup = isStudent && !isUserInAnyGroup && !isArchived
 
             return (
               <Card
@@ -261,19 +393,23 @@ export default function ClassGroupsTab({
                 padding="p-5"
                 className={`flex flex-col justify-between space-y-4 shadow-card transition-all hover:shadow-card-hover ${
                   isMyGroup ? 'ring-2 ring-brand-primary/40 bg-gradient-to-b from-purple-50/20 to-white' : ''
-                }`}
+                } ${isArchived ? 'opacity-80 bg-slate-50/50' : ''}`}
               >
                 <div className="space-y-3">
                   {/* Top Bar: Name + Badges */}
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-10 h-10 rounded-xl bg-brand-light text-brand-primary flex items-center justify-center font-bold text-sm shrink-0">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 ${
+                        isArchived ? 'bg-slate-200 text-slate-600' : 'bg-brand-light text-brand-primary'
+                      }`}>
                         {g.name.charAt(0).toUpperCase()}
                       </div>
                       <div className="min-w-0">
-                        <h4 className="text-sm font-bold text-brand-heading truncate" title={g.name}>
-                          {g.name}
-                        </h4>
+                        <div className="flex items-center gap-1.5">
+                          <h4 className="text-sm font-bold text-brand-heading truncate" title={g.name}>
+                            {g.name}
+                          </h4>
+                        </div>
                         <span className="text-[11px] text-brand-muted">
                           {members.length} {members.length === 1 ? 'member' : 'members'}
                         </span>
@@ -281,6 +417,11 @@ export default function ClassGroupsTab({
                     </div>
 
                     <div className="shrink-0 flex flex-col items-end gap-1">
+                      {isArchived && (
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300">
+                          Archived
+                        </span>
+                      )}
                       {isMyGroup && (
                         <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300/50">
                           Your Group
@@ -333,7 +474,7 @@ export default function ClassGroupsTab({
                 <div className="pt-3 border-t border-brand-line flex items-center justify-between gap-2">
                   <button
                     type="button"
-                    onClick={() => setSelectedGroupForDetails(g)}
+                    onClick={() => handleOpenGroupDetails(g.id)}
                     className="text-xs font-semibold text-brand-primary hover:underline flex items-center gap-1 cursor-pointer"
                   >
                     <span>View Group Details</span>
@@ -351,6 +492,10 @@ export default function ClassGroupsTab({
                     >
                       Join Group
                     </Button>
+                  ) : isArchived ? (
+                    <span className="text-[11px] text-slate-400 font-medium italic">
+                      Archived
+                    </span>
                   ) : isMyGroup ? (
                     <span className="text-[11px] font-bold text-emerald-700 flex items-center gap-1">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
@@ -389,6 +534,16 @@ export default function ClassGroupsTab({
         currentUser={currentUser}
         onJoinGroup={handleJoinGroup}
         isUserInAnyGroup={isUserInAnyGroup}
+        onGroupUpdated={handleGroupUpdated}
+      />
+
+      {/* Professor Group Creation Modal */}
+      <ProfessorCreateGroupModal
+        isOpen={isProfessorCreateOpen}
+        onClose={() => setIsProfessorCreateOpen(false)}
+        classId={classId}
+        className={className}
+        onGroupCreated={handleGroupUpdated}
       />
     </div>
   )

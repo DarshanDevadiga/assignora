@@ -21,7 +21,9 @@ export const classesService = {
           status,
           due_date,
           due_time,
-          points
+          points,
+          submission_type,
+          onedrive_link
         )
       `)
       .eq('admin_id', adminId)
@@ -52,7 +54,7 @@ export const classesService = {
           description,
           admin_id,
           users:admin_id (id, name, email, avatar),
-          assignments (id, title, due_date, points)
+          assignments (id, title, due_date, points, submission_type, onedrive_link)
         )
       `)
       .eq('student_id', studentId)
@@ -86,6 +88,8 @@ export const classesService = {
           due_date,
           due_time,
           drive_link,
+          onedrive_link,
+          submission_type,
           points,
           assign_to_all,
           status,
@@ -103,6 +107,85 @@ export const classesService = {
       throw error
     }
     return data
+  },
+
+  /**
+   * Complete Class Roster: Instructor, Enrolled Students & Group Affiliations
+   * Solves RLS peer visibility issue so both students and professors see the full class participant roster.
+   */
+  async getClassRoster(classId) {
+    if (!classId) return { instructor: null, students: [], total_students: 0 }
+
+    try {
+      const { data, error } = await supabase.rpc('get_class_roster', {
+        p_class_id: classId,
+      })
+
+      if (!error && data && data.success) {
+        return data
+      }
+    } catch (err) {
+      console.warn('[classesService] getClassRoster RPC fallback:', err)
+    }
+
+    // Defensive fallback using direct relations and group mapping
+    try {
+      const cls = await this.getClassById(classId)
+      if (!cls) return { instructor: null, students: [], total_students: 0 }
+
+      const instructor = cls.users || { name: 'Faculty Member', email: '', role: 'instructor' }
+      const members = cls.class_members || []
+
+      // Fetch active groups in this class to annotate group_name and is_leader
+      let groupMap = {}
+      try {
+        const { data: grpData } = await supabase
+          .from('group_members')
+          .select('student_id, groups:group_id (id, name, leader_id, status)')
+          .eq('class_id', classId)
+
+        ;(grpData || []).forEach((gm) => {
+          if (gm.groups && gm.groups.status === 'active') {
+            groupMap[gm.student_id] = {
+              group_id: gm.groups.id,
+              group_name: gm.groups.name,
+              is_leader: gm.groups.leader_id === gm.student_id,
+            }
+          }
+        })
+      } catch (gErr) {
+        console.warn('[classesService] getClassRoster group annotation fallback:', gErr)
+      }
+
+      const students = members
+        .filter((m) => m.users && m.users.role !== 'admin')
+        .map((m) => {
+          const u = m.users || {}
+          const grp = groupMap[m.student_id] || {}
+          return {
+            id: m.id,
+            student_id: m.student_id,
+            name: u.name || 'Student',
+            email: u.email || '',
+            avatar: u.avatar || null,
+            role: 'student',
+            joined_at: m.joined_at,
+            group_id: grp.group_id || null,
+            group_name: grp.group_name || null,
+            is_leader: Boolean(grp.is_leader),
+          }
+        })
+
+      return {
+        success: true,
+        instructor,
+        students,
+        total_students: students.length,
+      }
+    } catch (fallbackErr) {
+      console.error('[classesService] getClassRoster fallback failed:', fallbackErr)
+      return { instructor: null, students: [], total_students: 0 }
+    }
   },
 
   /**

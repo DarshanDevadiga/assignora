@@ -235,12 +235,24 @@ export default function SubmissionTracking() {
 
   // Derive group submissions into SUBMITTED and NOT SUBMITTED categories
   const groupRows = useMemo(() => {
-    if (!isGroupAssignment || !courseGroups) return { submitted: [], notSubmitted: [] }
+    if (!isGroupAssignment || !courseGroups) return { submitted: [], notSubmitted: [], eligibleGroups: [] }
 
     const submitted = []
     const notSubmitted = []
 
-    courseGroups.forEach((group) => {
+    // Respect selective assignment allocation
+    const allocatedStudentIds = new Set(
+      (currentAssignment?.assignment_students || []).map((ast) => ast.student_id).filter(Boolean)
+    )
+
+    const eligibleGroups = courseGroups.filter((group) => {
+      if (currentAssignment?.assign_to_all) return true
+      const mIds = (group.members || []).map((m) => m.student_id || m.user?.id).filter(Boolean)
+      if (mIds.length === 0) return false
+      return mIds.every((id) => allocatedStudentIds.has(id))
+    })
+
+    eligibleGroups.forEach((group) => {
       const sub = groupSubmissions.find((s) => s.group_id === group.id)
       const isSub = Boolean(
         sub && (sub.acknowledged_at || sub.status === 'submitted' || sub.status === 'reviewed')
@@ -257,7 +269,7 @@ export default function SubmissionTracking() {
           isSubmissionLate(currentAssignment.due_date, currentAssignment.due_time, sub.acknowledged_at)
       )
 
-      const memberList = group.members?.map((m) => m.users?.name || m.name).filter(Boolean) || []
+      const memberList = group.members?.map((m) => m.user?.name || m.users?.name || m.name).filter(Boolean) || []
       const leaderName = group.leader?.name || sub?.leader?.name || 'Leader'
       const acknowledgedByName = sub?.leader?.name || group.leader?.name || 'Leader'
 
@@ -301,9 +313,9 @@ export default function SubmissionTracking() {
   }, [isGroupAssignment, courseGroups, groupSubmissions, currentAssignment, isAssignmentOverdue])
 
   // Summary Metrics for Group Assignment
-  const totalEligibleGroups = courseGroups.length
   const acknowledgedGroupsCount = groupRows.submitted.length
   const unacknowledgedGroupsCount = groupRows.notSubmitted.length
+  const totalEligibleGroups = acknowledgedGroupsCount + unacknowledgedGroupsCount
   const groupGradedCount = groupRows.submitted.filter((r) => r.isGraded).length
   const groupAwaitingCount = groupRows.submitted.filter((r) => !r.isGraded).length
   const groupCompletionRate = calculateCompletionRate(acknowledgedGroupsCount, totalEligibleGroups)

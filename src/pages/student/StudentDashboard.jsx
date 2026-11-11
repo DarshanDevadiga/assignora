@@ -38,6 +38,7 @@ export default function StudentDashboard() {
   const [classes, setClasses] = useState([])
   const [assignments, setAssignments] = useState([])
   const [submissions, setSubmissions] = useState([])
+  const [groupSubmissions, setGroupSubmissions] = useState([])
   const [loading, setLoading] = useState(true)
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false)
 
@@ -50,8 +51,8 @@ export default function StudentDashboard() {
     try {
       setLoading(true)
 
-      // 1. Fetch class memberships, selective assignments, and submissions in parallel
-      const [membersResult, specificResult, subsResult] = await Promise.all([
+      // 1. Fetch class memberships, selective assignments, submissions, and student group memberships in parallel
+      const [membersResult, specificResult, subsResult, groupMembershipsResult] = await Promise.all([
         supabase
           .from('class_members')
           .select(`
@@ -70,15 +71,31 @@ export default function StudentDashboard() {
           `)
           .eq('student_id', user.id),
         submissionsService.getStudentSubmissions(user.id),
+        supabase
+          .from('group_members')
+          .select('group_id')
+          .eq('student_id', user.id),
       ])
 
       const studentClasses = membersResult.data?.map((m) => m.classes).filter(Boolean) || []
       setClasses(studentClasses)
       setSubmissions(subsResult || [])
 
+      // 2. Fetch group submissions for any active groups the student belongs to
+      const myGroupIds = (groupMembershipsResult.data || []).map((gm) => gm.group_id).filter(Boolean)
+      if (myGroupIds.length > 0) {
+        const { data: gSubs } = await supabase
+          .from('group_submissions')
+          .select('*')
+          .in('group_id', myGroupIds)
+        setGroupSubmissions(gSubs || [])
+      } else {
+        setGroupSubmissions([])
+      }
+
       const classIds = studentClasses.map((c) => c.id)
 
-      // 2. Fetch assignments assigned to all in student's enrolled classes
+      // 3. Fetch assignments assigned to all in student's enrolled classes
       let allAssigned = []
       if (classIds.length > 0) {
         const { data: classAssignments } = await supabase
@@ -111,7 +128,7 @@ export default function StudentDashboard() {
     }
   }
 
-  // Create submission status map: assignmentId -> submission object
+  // Create submission status map: assignmentId -> submission object (individual + group)
   const submissionMap = useMemo(() => {
     const map = {}
     submissions.forEach((sub) => {
@@ -122,8 +139,20 @@ export default function StudentDashboard() {
         map[sub.assignment_id] = sub
       }
     })
+    groupSubmissions.forEach((gsub) => {
+      if (
+        gsub &&
+        (gsub.status === 'submitted' || gsub.status === 'reviewed' || gsub.acknowledged_at || gsub.submission_link)
+      ) {
+        map[gsub.assignment_id] = {
+          ...gsub,
+          isGroupSubmission: true,
+          submitted_at: gsub.acknowledged_at || gsub.created_at,
+        }
+      }
+    })
     return map
-  }, [submissions])
+  }, [submissions, groupSubmissions])
 
   // Precise statistics derived strictly from eligible assignments
   const totalCount = assignments.length

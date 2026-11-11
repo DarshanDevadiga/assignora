@@ -5,7 +5,7 @@
 **Target Database:** `trkcagoxopabqerljgvn` (PostgreSQL 17.11 on Supabase ap-southeast-1)  
 **Production URL:** https://assignora-cyan.vercel.app/  
 **Repository:** https://github.com/DarshanDevadiga/assignora  
-**Last Updated:** 2026-11-10T14:59:30+05:30  
+**Last Updated:** 2026-11-10T21:10:00+05:30  
 
 ---
 
@@ -14,75 +14,129 @@
 | Phase / Objective | Status | Notes |
 | :--- | :--- | :--- |
 | **Phase 1: Full System Audit** | **PASS** | Validated 9 Round 1 tables, 10 functions, and live schema |
-| **Candidate SQL Source Audit** | **PASS** | Extracted and audited `assignora_round2_hardened_review_candidate.zip`; addressed all 6 identified blockers |
-| **Manifest Ownership Tracking** | **PASS** | Full inventory tracking (50 objects registered in `_assignora_migration_manifest`) |
-| **Preflight Collision Protection** | **PASS** | `preflight_validation.sql` executed against live database and passed (`[]`) |
-| **Database Migration Execution** | **PASS** | Applied `20261110000000_round2_groups_and_acknowledgements.sql` to live database `trkcagoxopabqerljgvn` |
-| **Post-Migration Verification** | **PASS** | Ran `post_migration_verification.sql`; all 8 catalog checks passed (`[]`, 0 errors) |
-| **Non-Destructive Rollback** | **PASS** | Manifest-guarded, fail-closed, zero `CASCADE` (all drops use `RESTRICT`), preserves pre-existing state |
-| **In-Course Groups Page/Tab** | **PASS** | `ClassGroupsTab.jsx` embedded into `ClassDetailPage.jsx` under `Groups` tab |
-| **Group Details Modal & History** | **PASS** | `GroupDetailsModal.jsx` displays leader badge, member roster, assignment history, and status |
-| **Leader-Only Acknowledgement** | **PASS** | Two-step dialog with `"Yes, I have submitted"`, member timestamp, and `"Not submitted by group leader"` |
-| **Empty Group State Guard** | **PASS** | Exact text `"You are not part of any group. Create or join one to submit this assignment."` |
-| **Professor Dual-List Tracking** | **PASS** | `SubmissionTracking.jsx` displays progress bar, stats, **SUBMITTED GROUPS**, and **NOT SUBMITTED GROUPS** |
-| **Group Grading & CSV Export** | **PASS** | Modal for grading group deliverables via `grade_group_submission` RPC; CSV exports with leader & members |
-| **Production Build Check** | **PASS** | `npm run build` completed cleanly in 24.67s (2177 modules, 0 errors) |
-| **Regression Verification** | **PASS** | 100% pass across individual submissions, group RPCs, and baseline invariant suite |
-| **README Documentation** | **PASS** | `README.md` completely updated with Task 1 vs Task 2 separation, Mermaid diagram, demo logins, submission checklist |
+| **Manifest Ownership Tracking** | **PASS** | 57 total objects recorded in `_assignora_migration_manifest` |
+| **Baseline Migration** | **PASS** | `20261110000000_round2_groups_and_acknowledgements.sql` live applied & verified |
+| **Advanced Migration** | **PASS** | `20261110000001_round2_advanced_groups_and_roster.sql` live applied & verified |
+| **Authoritative Membership Query** | **PASS** | Single authoritative `getStudentGroupInCourse(classId, studentId)` implemented |
+| **4-State Membership Machine** | **PASS** | `loading_membership`, `membership_found`, `membership_not_found`, `membership_error` in `AssignmentDetails.jsx` |
+| **Empty Group State Guard** | **PASS** | Exact text `"You are not part of any group. Create or join one to submit this assignment."` shown only on verified absence |
+| **Selective Allocation Guard** | **PASS** | Validates `assign_to_all` and `assignment_students` prior to group submission |
+| **Notification Realtime Dedup** | **PASS** | Channel reference tracking in `NotificationContext.jsx` prevents duplicate connections |
+| **Audio AbortError Guard** | **PASS** | Unhandled promise rejection suppression in `main.jsx` for browser audio interruptions |
+| **Group Messages Migration** | **PENDING APPROVAL** | `20261110000002_round2_group_messages.sql` prepared with RLS, rollback & verification; awaiting approval |
+| **Production Build Check** | **PASS** | `npm run build` completed cleanly (2180 modules bundled, 0 errors) |
 
 ---
 
 ## 2. Concrete Work Completed
 
-1. **In-Course Class Groups Section (`ClassGroupsTab.jsx` & `ClassDetailPage.jsx`)**:
-   - Added `Groups` tab to the course navigation alongside `Overview`, `Assignments`, `People`, `Messages`, and `Resources`.
-   - Displays all groups belonging to the active course with search filter.
-   - Shows Group Name, Leader with Crown badge, member avatars and names, member count, and assignment status.
-   - Provides `Create Group`, `Join Group`, and `View Details` modal actions directly in course context.
-   - Creator of a group automatically becomes leader with immediate Leader badge and member enrollment.
-   - Prevents joining a second group in the same course via database invariant.
+1. **Class People Directory Overhaul (`ClassDetailPage.jsx`)**:
+   - Fixed bug where students only saw themselves due to strict peer RLS policies.
+   - Added `classesService.getClassRoster(classId)` which calls `get_class_roster` RPC with relation-fallback.
+   - Added `is_class_member` and `is_classmate_of` `SECURITY DEFINER` helpers in database to prevent RLS recursion on `class_members` and `users`.
+   - Displays dedicated Course Instructor card with avatar, email, and role badge.
+   - Enrolled Students directory with:
+     - Student Name, Email, and Avatar.
+     - Group Badges: `Leader • [Group Name]` (Purple), `[Group Name]` (Blue), or `No Group Yet` (Gray).
+     - Filter Pills: `All`, `Leaders`, `In a Group`, `Without Group` with live count badges.
+     - Real-time search filter filtering by student name or email.
+     - Accurate total enrolled count: `totalEnrolledStudents`.
 
-2. **Group Details Modal (`GroupDetailsModal.jsx`)**:
-   - Full-featured modal displaying Course Name, Group Name, Leader Profile with Crown badge.
-   - Complete Member Roster with Leader vs Member distinguishing badges and email IDs.
-   - Group Assignment History listing all assignments with due dates, points, deliverables, and acknowledgement status.
+2. **Professor Group Creation Modal (`ProfessorCreateGroupModal.jsx`)**:
+   - Professors can create groups directly with enrolled members.
+   - Student selection checklist showing student name, email, and current group status.
+   - Students already in another group are clearly tagged `In group: [Group Name]` and disabled.
+   - Dynamic Leader selector dropdown: professor selects who among the chosen students will be the Group Leader.
+   - Invokes `groupsService.professorCreateGroup` with full validation.
 
-3. **Student Group Assignment Submission Workflow (`AssignmentDetails.jsx`)**:
-   - When student is not part of any group:
-     - Exact required prompt: `"You are not part of any group. Create or join one to submit this assignment."`
-     - Includes Create Group, Join Group, and View Course Groups action buttons.
-   - Group Leader Acknowledgement:
-     - Submission button: `"Yes, I have submitted"`
-     - Triggers confirmation dialog modal (`Confirm Group Submission`) before invoking `acknowledgeGroupAssignment`.
-     - Displays deliverable link and notes.
-   - Shared Group Member Status:
-     - All members see: `"Acknowledged by [Leader Name] on [Date and Time]"`
-     - Non-leader members prior to submission see: `"Not submitted by group leader"` and `"Awaiting Leader Acknowledgement"`.
+3. **Group Leader Member Selection (`AddGroupMembersModal.jsx`)**:
+   - Group leaders and professors can add eligible unassigned students directly from the group details modal.
+   - Searchable checklist of enrolled students who do not yet belong to any group.
+   - Instant membership updates upon submission.
 
-4. **Professor Group Assignment Tracking (`SubmissionTracking.jsx`)**:
-   - Detects `submission_type === 'group'` and switches to dual-list group view.
-   - Progress bar with completion percentage:
-     `[Percentage]% ([Acknowledged] of [Total] Groups Submitted)`
-   - 5 Summary metric cards: Total Groups, Acknowledged, Unacknowledged, Graded Groups, Awaiting Grading.
-   - Search filter to filter groups by name, leader, or member name.
-   - **SUBMITTED GROUPS**: Group Name, Leader with Crown, Members roster, Acknowledged By, Acknowledgement Timestamp, Deliverable link, Marks, Grade, Feedback, and Grade Group button.
-   - **NOT SUBMITTED GROUPS**: Group Name, Leader, Members roster, Member count, and Pending/Overdue status.
-   - Group grading modal evaluating group deliverable and recording grade via `grade_group_submission` RPC.
-   - Dedicated Group CSV Export (`Group_Submissions_[Title].csv`).
-   - Completely preserves Round 1 individual assignment tracking table and workflows when `submission_type === 'individual'`.
+4. **Group Leadership Transfer & Member Leave/Disband (`GroupDetailsModal.jsx`)**:
+   - Current leader can select any member and click "Make Leader" to transfer leadership.
+   - Confirmation dialog protects against accidental transfers.
+   - Ordinary members can leave the group via "Leave Group" confirmation dialog.
+   - Sole-member leaders can cleanly disband the group via "Disband Group" action.
+   - Academic history is preserved if submissions exist: group is safely archived (`action: 'archived'`).
 
-5. **Live Database Migration Applied & Verified (`trkcagoxopabqerljgvn`)**:
-   - All 50 objects recorded in `public._assignora_migration_manifest`.
-   - Tables: `faculty_invitations`, `groups`, `group_members`, `group_submissions`.
-   - Columns: `assignments.submission_type`, `assignments.onedrive_link`.
-   - 10 `SECURITY DEFINER` RPCs with `search_path = pg_catalog, pg_temp`.
-   - 12 anti-bypass RLS policies.
-   - Foreign keys enforce `ON DELETE RESTRICT` to protect submission history.
+5. **Student & Professor Group Assignment Workflows (`AssignmentDetails.jsx` & `SubmissionTracking.jsx`)**:
+   - Exact required empty state text: `"You are not part of any group. Create or join one to submit this assignment."`
+   - Group Leader Acknowledgement button: `"Yes, I have submitted"` with confirmation dialog.
+   - Shared Group Member Status: `"Acknowledged by [Leader Name] on [Date and Time]"` for all members.
+   - Non-leader status prior to submission: `"Not submitted by group leader"`.
+   - Dual-list Professor tracking: **SUBMITTED GROUPS** and **NOT SUBMITTED GROUPS** with progress bar and CSV export.
 
-6. **Automated Verification Suites Executed**:
-   - `node scripts/verify-round2-database-invariants.js`: **PASS**
-   - `node scripts/verify-submission-full.js`: **PASS**
-   - `npm run build`: **PASS** (2177 modules bundled in 24.67s, 0 errors).
+6. **Database Migration Execution (`trkcagoxopabqerljgvn`)**:
+   - Executed `supabase/migrations/20261110000001_round2_advanced_groups_and_roster.sql`.
+   - Verified catalog via `post_migration_verification_advanced.sql`.
+   - 57 objects recorded in `public._assignora_migration_manifest`.
+
+8. **Group Details Modal Redesign (`GroupDetailsModal.jsx`)**:
+   - Modern tabbed layout with 4 responsive sections: `Overview`, `Members`, `Group Assignments`, and `Group Chat`.
+   - Complete group name display preventing awkward clipping; secondary course name styling.
+   - Quick statistics grid (members, group tasks, submitted, pending) and designated leader spotlight.
+   - 1-click leadership transfer, member addition modal, and safe leave/disband dialogs.
+
+9. **Private Group Discussion Chat**:
+   - Private discussion workspace embedded inside `GroupDetailsModal.jsx`.
+   - Strict access gating: only active group members and class instructors can view or send messages.
+   - Real-time message streaming over Supabase Realtime channel `group-discussion:[groupId]`.
+   - Prepared migration package `20261110000002_round2_group_messages.sql`, rollback script, and verification script with full manifest tracking.
+
+10. **Chat Duplicate Elimination Engine (`messages.service.js`)**:
+    - Reconciles optimistic temporary IDs (`opt-*`) with server-persisted database UUIDs upon response receipt.
+    - Canonical message deduplication by persisted database ID across concurrent initial fetches, Realtime INSERTs, and broadcast channels.
+    - Prevents rapid double-sending through `isSending` button locking and form guards.
+
+11. **Group Assignment History & Allocation Filtering (`groups.service.js` & `SubmissionTracking.jsx`)**:
+    - Strictly filters assignments belonging to the group's class with `submission_type = 'group'`.
+    - Enforces selective assignment allocation: if `assign_to_all = false`, all group members must be assigned in `assignment_students`. Unallocated assignments are hidden from the group.
+    - Isolates submissions: only displays the selected group's acknowledgement status and timestamps.
+    - Professor's `SubmissionTracking.jsx` dynamically computes eligible groups based on selective allocation rules.
+
+12. **Dedicated Group Details Page (`GroupDetailsPage.jsx`)**:
+    - Full-page routing under `/classes/:classId/groups/:groupId` (and `/admin/...`, `/student/...` subpaths).
+
+13. **Simplified Manage Team Interface (`GroupManagementModal.jsx`)**:
+    - Clicking "Manage Team" now renders exclusively the management view for the selected existing group.
+    - Removed extraneous "Create New Group" and "Browse & Join Groups" tabs from Manage Team.
+    - Preserved independent group creation and joining on the Class Groups page (`ClassGroupsTab.jsx`).
+    - Removed misleading demo labels such as "(Demo)" from real group data by eliminating tab title templating.
+    - Features: Group name, Course name, Status badge (`Active`/`Archived`), Member count, Group leader highlight, complete scrollable member roster with student IDs, 1-click leadership transfer, "Add Members" button triggering `AddGroupMembersModal`, Leave/Disband group with confirmation dialogs, and clean Done action.
+
+14. **High-Performance Group Caching & Parallelized Data Loading (`groups.service.js`)**:
+    - Implemented in-memory cache `groupCache` (TTL 60s) for `getGroupById`, `getCourseGroups`, `getStudentGroupInCourse`, `getGroupAssignmentHistory`, and `getClassStudentsGroupStatus`.
+    - Parallelized independent database queries using `Promise.all` in `getGroupById` (group record + members).
+    - Resolved leader user profile directly from members array, eliminating redundant network roundtrips.
+    - Automated cache invalidation via `invalidateGroupCache` across all mutation RPCs (`createCourseGroup`, `joinCourseGroup`, `leaveCourseGroup`, `transferGroupLeadership`, `disbandCourseGroup`, `acknowledgeGroupAssignment`, `professorCreateGroup`, `addGroupMembers`).
+    - Lazy-loaded assignment history in `GroupDetailsModal.jsx` and `GroupDetailsPage.jsx` (only loads upon navigating to the `assignments` tab).
+    - Lazy-loaded group discussion chat and Realtime channel subscriptions (only connects when the `chat` tab is active).
+
+15. **Sidebar Navigation Role-Based Cleanup (`Sidebar.jsx` & `MobileNav.jsx`)**:
+    - Centrally removed the "Assignments" navigation item from the primary sidebar for Professor and Admin roles (`adminNav` in `Sidebar.jsx` and `items` in `MobileNav.jsx`).
+    - Preserved "Assignments" in the student navigation.
+    - Kept all in-course assignment routes, assignment creation/editing, grading, submission tracking, and student assignment details completely functional.
+
+16. **Role-Based Group Chat Message Badges & Styling (`GroupDetailsModal.jsx` & `GroupDetailsPage.jsx`)**:
+    - Created `getMessageSenderMeta(msg)` that resolves roles based on trusted database sender records:
+      - **Professor / Instructor:** Actual sender name, visible purple "Professor" badge, purple avatar/initials, and subtle purple-tinted message bubble.
+      - **Administrator:** Actual sender name, visible blue "Admin" badge, blue avatar, and subtle blue-tinted message bubble.
+      - **Group Leader:** Actual sender name, visible amber "Leader" badge with Crown icon, amber avatar, and distinct styling.
+      - **Student Member:** Actual sender name, clean member styling.
+    - Full responsiveness across mobile, tablet, and desktop without text overflowing.
+    - Breadcrumbs with "Back to Course Groups" button returning directly to the class Groups tab.
+    - Group header card with leader spotlight, member count, and responsive status pills.
+    - Four organized tabs: `Overview`, `Members`, `Group Assignments`, and `Private Group Chat`.
+    - Realtime message synchronization with optimistic message deduplication.
+    - Context-aware modal workflows for adding members, transferring leadership, leaving, and disbanding.
+
+17. **Flicker-Free Delayed Group Membership State (`ClassGroupsTab.jsx`)**:
+    - Implemented explicit 4-state machine: `'loading'`, `'member'`, `'not_member'`, `'error'`.
+    - Uses authoritative `getStudentGroupInCourse(classId, studentId)` database query.
+    - Eliminates UI flicker where "Create Group" button and "You are not part of any group" banner previously flashed before membership loaded.
+    - Renders smooth loading skeletons while verifying membership and safe retry alerts on database query error.
 
 ---
 
@@ -90,11 +144,11 @@
 
 - **Status:** **LIVE APPLIED & FULLY VERIFIED**
 - **Target DB:** `trkcagoxopabqerljgvn` (PostgreSQL 17.11 on AWS ap-southeast-1)
-- **Manifest Count:** 50 objects recorded in `_assignora_migration_manifest`
+- **Manifest Count:** 57 objects recorded in `_assignora_migration_manifest`
   - Columns: 2 (`assignments.submission_type`, `assignments.onedrive_link`)
   - Tables: 4 (`faculty_invitations`, `groups`, `group_members`, `group_submissions`)
-  - Functions: 10 (`create_course_group`, `join_course_group`, `leave_course_group`, `transfer_group_leadership`, `archive_course_group`, `disband_course_group`, `acknowledge_group_assignment`, `grade_group_submission`, `register_user_profile`, `create_faculty_invitation`)
-  - Policies: 12 (enforcing zero-bypass RLS)
+  - Functions: 15 (`create_course_group`, `join_course_group`, `leave_course_group`, `transfer_group_leadership`, `archive_course_group`, `disband_course_group`, `acknowledge_group_assignment`, `grade_group_submission`, `register_user_profile`, `create_faculty_invitation`, `professor_create_group`, `add_group_members`, `get_class_roster`, `is_class_member`, `is_classmate_of`)
+  - Policies: 14 (including peer visibility policies `class_members_peer_select_policy` and `users_classmates_select_policy`)
   - Triggers: 4 (immutable group lifecycle protection)
   - Indexes: 10 (including case-insensitive name uniqueness `idx_groups_class_id_name_ci`)
   - Constraints: 5 (including `unique_student_course_group`, `unique_assignment_group_submission`)
@@ -106,13 +160,17 @@
 
 | Test Suite | Command | Result | Notes |
 | :--- | :--- | :--- | :--- |
-| **Vite Production Build** | `npm run build` | **PASS** | 2177 modules bundled in 24.67s, 0 errors |
-| **Full Submission Pipeline** | `node scripts/verify-submission-full.js` | **PASS** | Creation, student 1 submission, duplicate block, student 2 submission, teacher review |
-| **Round 2 Invariant Suite** | `node scripts/verify-round2-database-invariants.js` | **PASS** | Baseline table counts, 1,000 CSPRNG tokens, schema constraints, zero regressions |
+| **Vite Production Build** | `npm run build` | **PASS** | 2180 modules bundled in 15.85s, 0 errors |
+| **Group Page & Membership Flow** | `node scripts/verify-group-page-and-membership-flow.js` | **PASS** | 15/15 tests passed: authoritative membership query, getGroupById contract, assignment allocation filtering, chat deduplication |
+| **Group Chat & Assignment Filtering** | `node scripts/verify-group-chat-and-filtering.js` | **PASS** | 18/18 tests passed: optimistic reconciliation, zero duplicate messages, assignment filtering, leader auth, migration verification |
+| **Group Fixes & E2E Verification** | `node scripts/verify-group-fixes-e2e.js` | **PASS** | 8/8 test phases passed (Group creation, member join, relationship resolution, leader acknowledgement, timestamps, archival protection, join rejection, class roster) |
+| **Advanced People & Groups** | `node scripts/verify-advanced-people-and-groups.js` | **PASS** | 11/11 tests passed: creation, membership, single group rule, leadership transfer, leave, solo group, professor creation, roster query, leader acknowledgement, archival protection |
+| **Full Submission Pipeline** | `node scripts/verify-submission-full.js` | **PASS** | Assignment creation, S1 submission, duplicate block, S2 submission, grading |
+| **Round 2 Invariant Suite** | `node scripts/verify-round2-database-invariants.js` | **PASS** | Table counts, CSPRNG tokens, schema constraints, zero regressions |
 
 ---
 
 ## 5. Next Steps
 
-1. Commit and push the in-course group management and dual-list tracking features to GitHub `origin/main`.
-2. Perform end-to-end user review on Vercel preview/production.
+1. Review Git status and prepare commit.
+2. Request Darshan's approval to push to GitHub `origin/main` and trigger production deployment on Vercel.

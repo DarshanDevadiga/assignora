@@ -111,24 +111,36 @@ export function NotificationProvider({ children }) {
   }, [user?.id, loadNotifications, loadClassUnreadCounts])
 
   // 3. Realtime subscription to assignora-realtime channel
+  const activeChannelRef = useRef(null)
+  const connectedUserRef = useRef(null)
+
   useEffect(() => {
     if (!user?.id) {
+      if (activeChannelRef.current) {
+        supabase.removeChannel(activeChannelRef.current)
+        activeChannelRef.current = null
+        connectedUserRef.current = null
+      }
       return
     }
 
     let isSubscribed = true
-    let activeChannel = null
 
-    // Ensure any stale channel is cleanly removed first to prevent duplicates
-    const existing = supabase.getChannels().find((c) => c.topic === 'realtime:assignora-realtime')
-    if (existing) {
-      supabase.removeChannel(existing)
+    // Remove any stale channel first to prevent duplicate connections
+    if (activeChannelRef.current) {
+      supabase.removeChannel(activeChannelRef.current)
+      activeChannelRef.current = null
     }
+
+    const existingChannels = supabase.getChannels().filter(
+      (c) => c.topic === 'realtime:assignora-realtime'
+    )
+    existingChannels.forEach((c) => supabase.removeChannel(c))
 
     const channel = supabase.channel('assignora-realtime', {
       config: { broadcast: { self: true } },
     })
-    activeChannel = channel
+    activeChannelRef.current = channel
 
     const handleBroadcast = ({ event, payload }) => {
       if (!isSubscribed) return
@@ -194,7 +206,10 @@ export function NotificationProvider({ children }) {
     channel.subscribe((status, error) => {
       if (!isSubscribed) return
       if (status === 'SUBSCRIBED') {
-        console.log('[NotificationContext] Realtime connected for user:', user.id)
+        if (connectedUserRef.current !== user.id) {
+          connectedUserRef.current = user.id
+          console.log('[NotificationContext] Realtime connected for user:', user.id)
+        }
       } else if (status === 'CHANNEL_ERROR') {
         console.warn('[NotificationContext] Realtime channel error:', error)
       } else if (status === 'TIMED_OUT') {
@@ -204,10 +219,10 @@ export function NotificationProvider({ children }) {
 
     return () => {
       isSubscribed = false
-      if (activeChannel) {
-        // Use official Supabase Realtime cleanup API
-        supabase.removeChannel(activeChannel)
-        activeChannel = null
+      if (activeChannelRef.current === channel) {
+        supabase.removeChannel(channel)
+        activeChannelRef.current = null
+        connectedUserRef.current = null
       }
     }
   }, [user?.id])

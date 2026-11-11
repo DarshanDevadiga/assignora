@@ -141,19 +141,99 @@ Round 2 elevates Assignora from a working prototype into an intuitive, polished 
 6. Interface displays celebratory confetti, locks resubmissions, and shows confirmed submission metadata.
 
 ### 4.5 Group Assignment & Team Acknowledgement Workflow
-- **Leader-Only Acknowledgement**: For group assignments, only the designated group leader is authorized to acknowledge deliverable completion on behalf of the team.
+- **Authoritative Membership Resolution**: Group membership is determined by `groupsService.getStudentGroupInCourse(classId, studentId)`, which authoritatively queries `group_members` using the authenticated student's user ID and resolves the associated `groups` record via foreign keys.
+- **Flicker-Free 4-State UI Machine**:
+  - `loading_membership`: Displays smooth skeleton placeholders; never shows premature "No group" alerts or create/join buttons during network requests.
+  - `membership_found`: Displays full team banner, leader designation, member count, and assignment status.
+  - `membership_not_found`: Displays the exact mandated message:
+    > **"You are not part of any group. Create or join one to submit this assignment."**  
+    Accompanied by prominent **Create Group** and **Join Group** action buttons.
+  - `membership_error`: Displays an explicit database error banner with a **Retry Verification** button; never erroneously converts a network/database failure into a "no group" state.
+- **Selective Assignment Allocation Guard**: Verifies whether group assignments with `assign_to_all = false` have been allocated to the student or their group before allowing submission.
+- **Leader-Only Acknowledgement**: For group assignments, only the designated group leader is authorized to acknowledge deliverable completion on behalf of the team. Non-leader members cannot acknowledge or submit individually.
 - **Universal Team Visibility**: Once the leader acknowledges, every enrolled member of the group sees the verified confirmation banner:
   > **"Acknowledged by [Leader Name] on [date and time]"**
-- **Non-Leader Member State**: Ordinary group members see a clean, locked view indicating **"Awaiting Leader Acknowledgement"** with leader contact info.
-- **Exact "No Group" Empty State**: When a student is enrolled in the class but has not yet joined a group, the interface displays the exact mandated prompt:
-  > **"You are not part of any group. Create or join one to submit this assignment."**
-  Accompanied by prominent **Create Group** and **Join Group** action buttons opening the management modal.
+- **Non-Leader Member State**: Ordinary group members see a clean, locked view indicating **"Not submitted by group leader"** with leader contact info.
+- **Archived Group Protection**: Historical group submissions remain fully accessible for review even if a group is archived at term conclusion.
 
-### 4.6 Group Management Modal (`GroupManagementModal.jsx`)
-- **Create Group**: Any enrolled student can create a group in a course and automatically becomes its leader and first member. Case-insensitive name uniqueness is enforced per course.
-- **Join Group**: Browse active course groups and join with one click.
-- **Roster & Leadership Display**: View all team members, identify the group leader with a distinct badge, view joined dates, and inspect active submissions.
+### 4.6 In-Course Group Section (`ClassGroupsTab.jsx`)
+- **Direct Course Embedding**: Embedded as a native `Groups` tab directly within the course navigation alongside `Overview`, `Assignments`, `People`, `Messages`, and `Resources`.
+- **Course Group Catalog**: Displays all active groups belonging to the specific course with real-time search.
+- **Group Cards**: Shows Group Name, Leader Crown badge, member avatars and names, total member count, and assignment status.
+- **Action Triggers**: One-click modal triggers for `Create Group`, `Join Group`, `View Details`, and `Add Members`.
+
+### 4.7 Advanced Group Management & In-Course Governance
+- **Group Leadership Transfer (`GroupDetailsModal.jsx`)**: The current leader can designate any active member as the new leader via a dedicated "Make Leader" action, backed by a confirmation dialog and server-side RPC validation.
+- **Student Leave Group**: Ordinary members can freely leave their group. Leaders cannot abandon a multi-member group without transferring leadership first.
+- **Group Disband**: When only the leader remains, the leader can disband the group. If assignments have already been submitted, the group is archived to preserve historical grade records.
+- **Professor Group Creation (`ProfessorCreateGroupModal.jsx`)**: Instructors can author course groups directly from the Groups tab, view a live checklist of enrolled students with real-time availability badges (disabling students already in another group), select members, and designate the initial leader.
+- **Group Leader Member Addition (`AddGroupMembersModal.jsx`)**: Group leaders and instructors can browse eligible unassigned students in the course and add them directly to an active group with one click.
 - **Course Invariant Enforcement**: Strict database and client enforcement ensuring a student can belong to at most **one group per course**.
+
+### 4.8 Class People Directory Overhaul (`ClassDetailPage.jsx`)
+- **Complete Class Visibility**: Fixed the peer RLS limitation where students only saw themselves. All enrolled participants and instructors are now visible to course members.
+- **Course Instructor Card**: Prominent card displaying the instructor's name, email, avatar, and verified instructor badge.
+- **Enrolled Students Directory**: Displays every enrolled student with:
+  - Full Name, Email, and Avatar.
+  - Distinct Group Status Badges:
+    - `Leader • [Group Name]` (Purple badge with Crown icon)
+    - `[Group Name]` (Blue badge with Users icon)
+    - `No Group Yet` (Muted gray badge)
+  - Interactive Filter Pills: `All`, `Leaders`, `In a Group`, `Without Group` with live count badges.
+  - Search Input: Instant client-side filtering by name or email.
+  - Enrollment Header: Displays exact verified student count (`totalEnrolledStudents`).
+
+### 4.9 Group Details Overhaul, Private Discussion Chat & Assignment Filtering
+- **Tabbed Modal Navigation (`GroupDetailsModal.jsx`)**:
+  - **Overview**: Group summary card, quick metric pills, designated leader spotlight, and team discussion teaser.
+  - **Members**: Complete roster with student avatars, names, student IDs, leader badges, and 1-click leadership transfer.
+  - **Group Assignments**: Strictly displays assignments applicable to the selected group (`submission_type = 'group'`, course-verified, selective allocation checked against `assignment_students`). Shows Submitted / Not Submitted badges, deliverable links, and leader acknowledgement timestamps.
+  - **Group Chat**: Dedicated private group discussion interface isolated from general class chat.
+- **Private Intra-Group Discussion Chat**:
+  - Only active group members and authorized class instructors can access or send messages.
+  - Real-time synchronization over dedicated WebSocket topic `group-discussion:[groupId]`.
+  - Empty states, loading spinners, sender role badges (`Leader`, `Instructor`), and auto-scroll to newest message.
+- **Chat Duplicate Elimination Engine (`messages.service.js`)**:
+  - Reconciles optimistic client-side temporary IDs (`opt-*`) with canonical database UUIDs upon RPC receipt.
+  - Deduplicates messages by persisted database ID across concurrent initial fetches, Realtime INSERTs, and broadcast channels.
+  - Prevents rapid double-sending through `isSending` button locking.
+
+### 4.10 Dedicated Group Details Full Page & Flicker-Free Membership State
+- **Full-Page Routing (`/classes/:classId/groups/:groupId`)**: Clicking any group card or "View Group Details" link navigates directly to a dedicated, responsive full-page workspace (`GroupDetailsPage.jsx`).
+  - Compatible with `/student/classes/:classId/groups/:groupId`, `/admin/classes/:classId/groups/:groupId`, and direct URL bookmarks.
+  - Persistent dashboard shell with class breadcrumbs and a dedicated "Back to Course Groups" button.
+  - 4 comprehensive tabs: `Overview`, `Members`, `Group Assignments`, and `Private Group Chat`.
+- **Flicker-Free Delayed Group Membership State (`ClassGroupsTab.jsx`)**:
+  - Implemented an explicit 4-state state machine: `'loading'`, `'member'`, `'not_member'`, `'error'`.
+  - Driven by the authoritative `groupsService.getStudentGroupInCourse(classId, studentId)` database query.
+  - Completely eliminates button and banner flicker where the "Create Group" button and "You are not part of any group" banner previously appeared for a split second before membership was loaded.
+  - Displays smooth skeleton loaders during verification and an actionable retry alert if network errors occur.
+
+### 4.11 Simplified Manage Team, Caching, Sidebar Role Architecture & Role-Based Chat Badges
+- **Dedicated Manage Team Interface (`GroupManagementModal.jsx`)**:
+  - Clicking "Manage Team" now renders exclusively the management view for the selected active group.
+  - Eliminated the confusing multi-tab bar (`My Group`, `Create New Group`, `Browse & Join Groups`) from the Manage Team view.
+  - Retained independent group creation and joining workflows on the main Class Groups tab (`ClassGroupsTab.jsx`).
+  - Removed misleading demo labels such as `(Demo)` from real groups by removing tab title string interpolation.
+  - Features: Group Name, Course Name, Status badge (`Active`/`Archived`), Member Count, Group Leader, complete scrollable member roster with student IDs, 1-click leadership transfer, "Add Members" button opening `AddGroupMembersModal`, Leave/Disband group confirmation dialogs, and a clean Done button.
+- **High-Performance Group Caching & Parallel Loading (`groups.service.js`)**:
+  - In-memory cache `groupCache` (TTL 60s) for `getGroupById`, `getCourseGroups`, `getStudentGroupInCourse`, and `getGroupAssignmentHistory`.
+  - Concurrently executed queries via `Promise.all` in `getGroupById` to fetch the group record and member list simultaneously.
+  - Resolves leader user profile directly from the member list to eliminate redundant database roundtrips.
+  - Invalidation via `invalidateGroupCache` across all mutation RPCs (`createCourseGroup`, `joinCourseGroup`, `leaveCourseGroup`, `transferGroupLeadership`, `disbandCourseGroup`, `acknowledgeGroupAssignment`, `professorCreateGroup`, `addGroupMembers`).
+  - Lazy-loaded assignment history and private chat messages: requests are deferred until their respective tabs are activated.
+  - Realtime WebSocket channel connects only when the private chat tab is active.
+- **Main Sidebar Role Separation (`Sidebar.jsx` & `MobileNav.jsx`)**:
+  - Centrally removed the "Assignments" navigation item from the primary sidebar for Professor and Admin roles.
+  - Preserved "Assignments" for students in desktop sidebar and mobile navigation.
+  - Maintained all class-level assignment features (creation, editing, grading, submission tracking, student assignment details).
+- **Role-Based Group Chat Message Badges & Styling (`GroupDetailsModal.jsx` & `GroupDetailsPage.jsx`)**:
+  - Resolves roles from trusted database sender profiles (`senderRole`, instructor foreign keys):
+    - **Professor / Instructor**: Actual sender name, visible purple "Professor" badge, purple avatar/initials, and subtle purple-tinted message bubble.
+    - **Administrator**: Actual sender name, visible blue "Admin" badge, blue avatar, and subtle blue-tinted message bubble.
+    - **Group Leader**: Actual sender name, visible amber "Leader" badge with Crown icon, amber avatar, and distinct styling.
+    - **Student Member**: Actual sender name, clean member styling.
+  - Fully responsive on mobile, tablet, and desktop without text truncation or layout breakage.
 
 ---
 
@@ -441,18 +521,38 @@ All features are covered by automated verification scripts and build validation:
 ```bash
 # 1. Production Build & Bundle Compilation
 npm run build
-# Result: PASS (2,175 modules bundled in 19.20s, 0 errors, gzip-optimized)
+# Result: PASS (2,179 modules bundled, 0 errors, gzip-optimized)
 
-# 2. Database Baseline Invariants & Cryptographic Token Test
+# 2. Group Page & Membership Flow Verification
+node scripts/verify-group-page-and-membership-flow.js
+# Result: PASS (15/15 tests: authoritative membership query, getGroupById contract,
+#               selective allocation filtering, chat message deduplication)
+
+# 3. Group Chat & Assignment Filtering Test
+node scripts/verify-group-chat-and-filtering.js
+# Result: PASS (18/18 tests: optimistic reconciliation, zero duplicate messages,
+#               assignment filtering, leader auth, migration verification)
+
+# 4. Group System & End-to-End Workflow Verification
+node scripts/verify-group-fixes-e2e.js
+# Result: PASS (8/8 phases: group creation, member join, relationship resolution,
+#               leader-only acknowledgement, timestamps, archival protection, roster query)
+
+# 5. Advanced People & Group Governance Test
+node scripts/verify-advanced-people-and-groups.js
+# Result: PASS (11/11 tests: creation, membership, single-group rule, leadership transfer,
+#               member leave, solo disband, professor creation, roster query, archival)
+
+# 6. Database Baseline Invariants & Cryptographic Token Test
 node scripts/verify-round2-database-invariants.js
 # Result: PASS (Verified 7 users, 7 classes, 22 enrollments, 18 assignments, 31 submissions;
 #               1,000 192-bit CSPRNG tokens generated with 0 collisions)
 
-# 3. Comprehensive Submission & Constraint Test
+# 7. Comprehensive Submission & Constraint Test
 node scripts/verify-submission-full.js
 # Result: PASS (Verified individual submissions, duplicate rejection, and instructor visibility)
 
-# 4. Real-Time Messaging & Performance Latency Test
+# 8. Real-Time Messaging & Performance Latency Test
 node scripts/verify-messaging-and-performance.js
 # Result: PASS (Verified message sync, date formatters, and sub-second dashboard load)
 ```

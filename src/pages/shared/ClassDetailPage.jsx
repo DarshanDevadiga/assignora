@@ -28,7 +28,9 @@ import {
   KeyRound,
   Shield,
   GraduationCap,
-  MessageSquare
+  MessageSquare,
+  Search,
+  Crown
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { classesService } from '../../services/classes.service'
@@ -95,6 +97,9 @@ export default function ClassDetailPage() {
   const [lastReadTimestamp, setLastReadTimestamp] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [classRoster, setClassRoster] = useState({ instructor: null, students: [], total_students: 0 })
+  const [peopleFilter, setPeopleFilter] = useState('all') // all, leaders, inGroup, noGroup
+  const [peopleSearch, setPeopleSearch] = useState('')
 
   // Modals & Action States
   const [isInviteOpen, setIsInviteOpen] = useState(false)
@@ -228,15 +233,20 @@ export default function ClassDetailPage() {
         setCurrentClass(cls)
 
         // 2. Fetch class sub-resources in parallel for maximum speed & resilience
-        const [subsRes, annRes, actsRes, resRes, msgsRes] = await Promise.allSettled([
+        const [subsRes, annRes, actsRes, resRes, msgsRes, rosterRes] = await Promise.allSettled([
           submissionsService.getClassSubmissions(classId),
           announcementsService.getClassAnnouncements(classId),
           classesService.getClassActivity(classId),
           classesService.getClassResources(classId),
           messagesService.getClassMessages(classId),
+          classesService.getClassRoster(classId),
         ])
 
         if (isCancelled) return
+
+        if (rosterRes.status === 'fulfilled' && rosterRes.value) {
+          setClassRoster(rosterRes.value)
+        }
 
         if (subsRes.status === 'fulfilled') {
           setSubmissions(subsRes.value || [])
@@ -570,8 +580,31 @@ export default function ClassDetailPage() {
 
   // Derived metrics
   const classCode = currentClass ? classesService.getClassCode(currentClass) : ''
-  const members = currentClass?.class_members || []
+  const members = classRoster.students?.length > 0 ? classRoster.students : (currentClass?.class_members || [])
+  const totalEnrolledStudents = classRoster.total_students || members.length
   const assignments = currentClass?.assignments || []
+
+  // People tab filtering and metrics
+  const filteredStudents = useMemo(() => {
+    return members.filter((s) => {
+      if (peopleFilter === 'leaders' && !s.is_leader) return false
+      if (peopleFilter === 'inGroup' && !s.group_name) return false
+      if (peopleFilter === 'noGroup' && s.group_name) return false
+
+      if (peopleSearch.trim()) {
+        const q = peopleSearch.toLowerCase().trim()
+        const matchName = (s.name || '').toLowerCase().includes(q)
+        const matchEmail = (s.email || '').toLowerCase().includes(q)
+        const matchGroup = (s.group_name || '').toLowerCase().includes(q)
+        return matchName || matchEmail || matchGroup
+      }
+      return true
+    })
+  }, [members, peopleFilter, peopleSearch])
+
+  const leaderCount = useMemo(() => members.filter((s) => s.is_leader).length, [members])
+  const inGroupCount = useMemo(() => members.filter((s) => s.group_name).length, [members])
+  const withoutGroupCount = useMemo(() => members.filter((s) => !s.group_name).length, [members])
 
   // Student specific data
   const mySubmissions = useMemo(() => {
@@ -624,7 +657,7 @@ export default function ClassDetailPage() {
                 {currentClass.subject || 'Course'}
               </span>
               <span className="text-xs text-white/80 font-medium">
-                • {members.length} Enrolled {members.length === 1 ? 'Student' : 'Students'}
+                • {totalEnrolledStudents} Enrolled {totalEnrolledStudents === 1 ? 'Student' : 'Students'}
               </span>
             </div>
 
@@ -707,9 +740,9 @@ export default function ClassDetailPage() {
                   {assignments.length}
                 </span>
               )}
-              {tab.id === 'people' && members.length > 0 && (
+              {tab.id === 'people' && totalEnrolledStudents > 0 && (
                 <span className="text-[10px] bg-slate-100 text-brand-muted px-1.5 py-0.2 rounded-full font-bold">
-                  {members.length}
+                  {totalEnrolledStudents}
                 </span>
               )}
             </button>
@@ -1372,7 +1405,7 @@ export default function ClassDetailPage() {
       )}
 
       {/* =========================================================================
-          TAB 7: PEOPLE (Student Management, Action Menu, Removal Dialog, Invite Dialog)
+          TAB 7: PEOPLE (Student Management, Role Separation, Group Affiliations)
       ========================================================================= */}
       {activeTab === 'people' && (
         <div className="space-y-6">
@@ -1380,10 +1413,10 @@ export default function ClassDetailPage() {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-bold text-brand-heading">
-                Class Members ({members.length})
+                Class Members ({totalEnrolledStudents + 1})
               </h3>
               <p className="text-xs text-brand-muted">
-                Manage enrolled students, review member profiles, and invite new students
+                Complete class directory: course instructors, administrators, and enrolled student teams
               </p>
             </div>
 
@@ -1392,88 +1425,191 @@ export default function ClassDetailPage() {
                 variant="primary"
                 icon={UserPlus}
                 onClick={() => setIsInviteOpen(true)}
-                className="shadow-purple-glow font-semibold"
+                className="shadow-purple-glow font-semibold cursor-pointer"
               >
                 Invite Student
               </Button>
             )}
           </div>
 
-          {/* Teacher Section */}
+          {/* Section 1: Course Instructor */}
           <div className="space-y-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-brand-muted">
-              Teachers
+            <h4 className="text-xs font-bold uppercase tracking-wider text-brand-muted flex items-center gap-1.5">
+              <Shield className="w-3.5 h-3.5 text-brand-primary" />
+              <span>Course Instructor</span>
             </h4>
             <Card padding="p-4" className="shadow-card flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-brand-light text-brand-primary flex items-center justify-center font-bold">
-                  {currentClass.users?.avatar ? (
-                    <img src={currentClass.users.avatar} alt="Teacher" className="w-full h-full object-cover rounded-full" />
+                  {classRoster.instructor?.avatar || currentClass.users?.avatar ? (
+                    <img
+                      src={classRoster.instructor?.avatar || currentClass.users?.avatar}
+                      alt="Teacher"
+                      className="w-full h-full object-cover rounded-full"
+                    />
                   ) : (
-                    <span>{currentClass.users?.name?.charAt(0) || 'P'}</span>
+                    <span>{(classRoster.instructor?.name || currentClass.users?.name || 'P').charAt(0)}</span>
                   )}
                 </div>
                 <div>
                   <strong className="text-sm text-brand-heading block">
-                    {currentClass.users?.name || 'Faculty Member'}
+                    {classRoster.instructor?.name || currentClass.users?.name || 'Faculty Member'}
                   </strong>
                   <span className="text-xs text-brand-muted">
-                    {currentClass.users?.email || 'admin@assignora.demo'}
+                    {classRoster.instructor?.email || currentClass.users?.email || 'admin@assignora.demo'}
                   </span>
                 </div>
               </div>
-              <Badge variant="primary" size="sm">
-                Class Owner
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant="purple" size="sm">
+                  Faculty
+                </Badge>
+                <Badge variant="primary" size="sm">
+                  Class Owner
+                </Badge>
+              </div>
             </Card>
           </div>
 
-          {/* Students Section */}
+          {/* Section 2: Enrolled Students & Group Affiliations */}
           <div className="space-y-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-brand-muted">
-              Students ({members.length})
-            </h4>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-brand-muted flex items-center gap-1.5">
+                  <GraduationCap className="w-3.5 h-3.5 text-brand-primary" />
+                  <span>Enrolled Students ({totalEnrolledStudents})</span>
+                </h4>
+                <p className="text-[11px] text-brand-muted">
+                  All active student participants enrolled in this course
+                </p>
+              </div>
 
-            {members.length > 0 ? (
+              {/* Filter Tabs */}
+              <div className="flex items-center gap-1.5 overflow-x-auto text-xs font-semibold scrollbar-none">
+                <button
+                  type="button"
+                  onClick={() => setPeopleFilter('all')}
+                  className={`px-3 py-1 rounded-full transition-all cursor-pointer whitespace-nowrap ${
+                    peopleFilter === 'all'
+                      ? 'bg-brand-primary text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  All ({members.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPeopleFilter('leaders')}
+                  className={`px-3 py-1 rounded-full transition-all cursor-pointer whitespace-nowrap ${
+                    peopleFilter === 'leaders'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  Leaders ({leaderCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPeopleFilter('inGroup')}
+                  className={`px-3 py-1 rounded-full transition-all cursor-pointer whitespace-nowrap ${
+                    peopleFilter === 'inGroup'
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  In a Group ({inGroupCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPeopleFilter('noGroup')}
+                  className={`px-3 py-1 rounded-full transition-all cursor-pointer whitespace-nowrap ${
+                    peopleFilter === 'noGroup'
+                      ? 'bg-slate-700 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  Without Group ({withoutGroupCount})
+                </button>
+              </div>
+            </div>
+
+            {/* Search Input */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={peopleSearch}
+                onChange={(e) => setPeopleSearch(e.target.value)}
+                placeholder="Search enrolled students by name, email, or group name..."
+                className="w-full rounded-xl border border-brand-line bg-white pl-9 pr-4 py-2 text-xs focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20 shadow-xs"
+              />
+            </div>
+
+            {filteredStudents.length > 0 ? (
               <div className="bg-white rounded-2xl border border-brand-line shadow-card divide-y divide-brand-line/60 overflow-hidden">
-                {members.map((member) => {
-                  const student = member.users || {}
+                {filteredStudents.map((member) => {
+                  const studentName = member.name || member.users?.name || 'Student Name'
+                  const studentEmail = member.email || member.users?.email || ''
+                  const studentAvatar = member.avatar || member.users?.avatar || null
+                  const joinedDate = member.joined_at
+                  const groupName = member.group_name
+                  const isLeader = member.is_leader
 
                   return (
                     <div
-                      key={member.id}
+                      key={member.id || member.student_id}
                       className="p-4 flex items-center justify-between gap-4 hover:bg-slate-50/70 transition-colors"
                     >
                       <div className="flex items-center gap-3.5 min-w-0">
                         <div className="w-10 h-10 rounded-full bg-slate-100 text-brand-heading flex items-center justify-center font-bold text-sm ring-2 ring-brand-border/60 overflow-hidden shrink-0">
-                          {student.avatar ? (
-                            <img src={student.avatar} alt={student.name} className="w-full h-full object-cover" />
+                          {studentAvatar ? (
+                            <img src={studentAvatar} alt={studentName} className="w-full h-full object-cover" />
                           ) : (
-                            <span>{student.name?.charAt(0) || 'S'}</span>
+                            <span>{studentName.charAt(0) || 'S'}</span>
                           )}
                         </div>
 
                         <div className="min-w-0">
-                          <h5 className="font-bold text-sm text-brand-heading truncate">
-                            {student.name || 'Student Name'}
-                          </h5>
+                          <div className="flex items-center gap-1.5">
+                            <h5 className="font-bold text-sm text-brand-heading truncate">
+                              {studentName}
+                            </h5>
+                            {member.student_id === user?.id && (
+                              <span className="text-[10px] bg-slate-100 text-slate-600 font-medium px-1.5 py-0.2 rounded">
+                                You
+                              </span>
+                            )}
+                          </div>
                           <span className="text-xs text-brand-muted truncate block">
-                            {student.email}
+                            {studentEmail}
                           </span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-4 shrink-0">
+                      <div className="flex items-center gap-3 shrink-0 flex-wrap justify-end">
+                        {/* Group Status Badge */}
+                        {isLeader ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300/70">
+                            <Crown className="w-3 h-3 text-amber-600 shrink-0" />
+                            <span>Leader • {groupName}</span>
+                          </span>
+                        ) : groupName ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                            <Users className="w-3 h-3 text-brand-primary shrink-0" />
+                            <span>{groupName}</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                            No Group Yet
+                          </span>
+                        )}
+
                         <div className="text-right hidden sm:block">
-                          <span className="text-[11px] text-brand-muted block">Enrolled Date</span>
+                          <span className="text-[10px] text-brand-muted block uppercase">Enrolled</span>
                           <span className="text-xs font-semibold text-brand-heading">
-                            {formatDisplayDate(member.joined_at)}
+                            {joinedDate ? formatDisplayDate(joinedDate) : 'Active'}
                           </span>
                         </div>
-
-                        <Badge variant="success" size="sm" dot>
-                          Enrolled
-                        </Badge>
 
                         {/* Action 3-dots Menu for Teacher */}
                         {isTeacher && (
@@ -1521,11 +1657,15 @@ export default function ClassDetailPage() {
             ) : (
               <Card className="text-center py-12 space-y-3">
                 <Users className="w-10 h-10 text-slate-300 mx-auto" />
-                <h4 className="text-sm font-bold text-brand-heading">No students enrolled yet</h4>
+                <h4 className="text-sm font-bold text-brand-heading">
+                  {peopleSearch ? 'No matching students found' : 'No students enrolled yet'}
+                </h4>
                 <p className="text-xs text-brand-muted max-w-sm mx-auto">
-                  Invite students using your unique class code or share the invitation link.
+                  {peopleSearch
+                    ? `No enrolled students matched "${peopleSearch}". Try a different name or email.`
+                    : 'Invite students using your unique class code or share the invitation link.'}
                 </p>
-                {isTeacher && (
+                {isTeacher && !peopleSearch && (
                   <Button
                     variant="primary"
                     size="sm"

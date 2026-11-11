@@ -26,7 +26,6 @@ export default function Sidebar({
   const adminNav = [
     { name: 'Dashboard', path: '/admin', icon: Home, end: true },
     { name: 'Classes', path: '/admin/classes', icon: BookOpen },
-    { name: 'Assignments', path: '/admin/assignments', icon: ClipboardList },
     { name: 'Students', path: '/admin/students', icon: Users },
   ]
 

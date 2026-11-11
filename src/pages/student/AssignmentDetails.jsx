@@ -48,6 +48,11 @@ export default function AssignmentDetails() {
   const [groupSubmission, setGroupSubmission] = useState(null)
   const [loading, setLoading] = useState(true)
 
+  // Explicit 4-state machine for group membership
+  // 'loading_membership' | 'membership_found' | 'membership_not_found' | 'membership_error'
+  const [membershipState, setMembershipState] = useState('loading_membership')
+  const [membershipError, setMembershipError] = useState('')
+
   // Group modal state
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false)
   const [groupModalInitialTab, setGroupModalInitialTab] = useState('create')
@@ -68,23 +73,38 @@ export default function AssignmentDetails() {
     if (!assignmentId || !user?.id) return
     try {
       setLoading(true)
+      setErrorMessage('')
+      setMembershipError('')
+
       const assignmentData = await assignmentsService.getAssignmentById(assignmentId)
       setAssignment(assignmentData)
 
       const isGroup = assignmentData?.submission_type === 'group'
 
       if (isGroup && assignmentData?.class_id) {
-        // Fetch student's group in this class
-        const grp = await groupsService.getStudentGroupInCourse(assignmentData.class_id, user.id)
-        setStudentGroup(grp)
+        setMembershipState('loading_membership')
+        try {
+          // Authoritative lookup using class_id and user.id (auth user UUID)
+          const grp = await groupsService.getStudentGroupInCourse(assignmentData.class_id, user.id)
+          if (grp && grp.id) {
+            setStudentGroup(grp)
+            setMembershipState('membership_found')
 
-        if (grp) {
-          const grpSub = await groupsService.getGroupSubmission(assignmentId, grp.id)
-          setGroupSubmission(grpSub)
-          if (grpSub) {
-            setSubmissionLink(grpSub.submission_link || '')
-            setComment(grpSub.comment || '')
+            const grpSub = await groupsService.getGroupSubmission(assignmentId, grp.id)
+            setGroupSubmission(grpSub)
+            if (grpSub) {
+              setSubmissionLink(grpSub.submission_link || '')
+              setComment(grpSub.comment || '')
+            }
+          } else {
+            setStudentGroup(null)
+            setMembershipState('membership_not_found')
           }
+        } catch (grpErr) {
+          console.error('[AssignmentDetails] Group membership lookup failed:', grpErr)
+          setMembershipState('membership_error')
+          setMembershipError(grpErr.message || 'Failed to verify course group membership.')
+          setStudentGroup(null)
         }
       } else {
         // Individual submission
@@ -96,7 +116,7 @@ export default function AssignmentDetails() {
         }
       }
     } catch (err) {
-      console.error('[AssignmentDetails] Error loading:', err)
+      console.error('[AssignmentDetails] Error loading assignment:', err)
       setErrorMessage('Failed to load assignment details.')
     } finally {
       setLoading(false)
@@ -372,8 +392,68 @@ export default function AssignmentDetails() {
                 )}
               </div>
 
-              {/* Case A: Student is NOT part of any group in this course */}
-              {!studentGroup ? (
+              {/* Allocation Guard: If assignment is selectively assigned and student not included */}
+              {!assignment?.assign_to_all &&
+              !(assignment?.assignment_students || []).some((ast) => ast.student_id === user?.id) ? (
+                <div className="p-5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 space-y-2">
+                  <div className="flex items-start gap-2.5">
+                    <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="text-xs sm:text-sm font-bold">Assignment Not Allocated</h4>
+                      <p className="text-xs text-amber-800 mt-1">
+                        This assignment was selectively allocated to specific students or groups in this course. You or your group are not currently designated to submit this assignment.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : membershipState === 'loading_membership' ? (
+                /* State 1: loading_membership - Skeleton display (no Create/Join actions shown) */
+                <div className="p-6 rounded-2xl border border-brand-line/80 bg-slate-50/50 space-y-4 animate-pulse">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-slate-200" />
+                    <div className="space-y-1.5 flex-1">
+                      <div className="h-4 bg-slate-200 rounded w-1/3" />
+                      <div className="h-3 bg-slate-200 rounded w-1/2" />
+                    </div>
+                  </div>
+                  <div className="h-10 bg-slate-200 rounded-xl w-full" />
+                  <p className="text-xs text-brand-muted text-center">
+                    Verifying course group membership...
+                  </p>
+                </div>
+              ) : membershipState === 'membership_error' ? (
+                /* State 2: membership_error - Explicit database error with retry */
+                <div className="p-5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 space-y-3.5">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="text-xs sm:text-sm font-bold">Group Verification Error</h4>
+                      <p className="text-xs text-rose-800 mt-1">
+                        {membershipError || 'Could not verify your course group membership due to a database connection issue.'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="pt-1 flex items-center gap-2 flex-wrap">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={loadAssignmentAndSubmission}
+                    >
+                      Retry Verification
+                    </Button>
+                    {assignment.class_id && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => navigate(`/student/classes/${assignment.class_id}?tab=groups`)}
+                      >
+                        View Course Groups
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ) : !studentGroup || membershipState === 'membership_not_found' ? (
+                /* State 3: membership_not_found - EXACT REQUIRED TEXT */
                 <div className="p-5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 space-y-3.5">
                   <div className="flex items-start gap-3">
                     <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
@@ -422,7 +502,7 @@ export default function AssignmentDetails() {
                   </div>
                 </div>
               ) : (
-                /* Case B: Student is in a group */
+                /* State 4: membership_found - Student is in a group */
                 <div className="space-y-4">
                   {/* Team Banner */}
                   <div className="p-3.5 rounded-xl bg-brand-light/40 border border-brand-border/60 flex items-center justify-between gap-3">
@@ -438,6 +518,11 @@ export default function AssignmentDetails() {
                           {isLeader && (
                             <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">
                               <Crown className="w-2.5 h-2.5" /> Leader
+                            </span>
+                          )}
+                          {studentGroup.status === 'archived' && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-200 text-slate-700">
+                              Archived
                             </span>
                           )}
                         </div>
@@ -532,6 +617,16 @@ export default function AssignmentDetails() {
                         <span>All group members share this verified acknowledgement record.</span>
                       </div>
                     </div>
+                  ) : studentGroup?.status === 'archived' ? (
+                    /* Group is archived and not acknowledged */
+                    <div className="p-5 rounded-xl bg-slate-50 border border-slate-200 text-center space-y-2">
+                      <Badge variant="neutral" size="md">
+                        Group Archived
+                      </Badge>
+                      <p className="text-xs text-brand-muted max-w-xs mx-auto">
+                        This group has been archived by the course instructor or leader. Further submissions for this group are closed.
+                      </p>
+                    </div>
                   ) : isLeader ? (
                     /* Current user is the leader and hasn't submitted yet */
                     <form onSubmit={handleOpenLeaderConfirmModal} className="space-y-4">
@@ -586,7 +681,7 @@ export default function AssignmentDetails() {
                           Not submitted by group leader
                         </Badge>
                         <h4 className="text-xs sm:text-sm font-bold text-brand-heading pt-1">
-                          Awaiting Leader Acknowledgement
+                          Not submitted by group leader
                         </h4>
                       </div>
                       <p className="text-xs text-brand-muted max-w-xs mx-auto leading-relaxed">

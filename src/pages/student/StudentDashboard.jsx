@@ -407,7 +407,11 @@ export default function StudentDashboard() {
                         variant="outline"
                         size="sm"
                         icon={Eye}
-                        onClick={() => navigate(`/student/assignments/${assignment.id}`)}
+                        onClick={() =>
+                          navigate(`/student/assignments/${assignment.id}`, {
+                            state: { from: 'assignments', classId: assignment.class_id },
+                          })
+                        }
                       >
                         View
                       </Button>
@@ -417,7 +421,11 @@ export default function StudentDashboard() {
                         size="sm"
                         icon={Send}
                         className="shadow-purple-glow font-semibold"
-                        onClick={() => navigate(`/student/assignments/${assignment.id}`)}
+                        onClick={() =>
+                          navigate(`/student/assignments/${assignment.id}`, {
+                            state: { from: 'assignments', classId: assignment.class_id },
+                          })
+                        }
                       >
                         Submit
                       </Button>
@@ -523,7 +531,11 @@ export default function StudentDashboard() {
                 return (
                   <div
                     key={item.id}
-                    onClick={() => navigate(`/student/assignments/${item.id}`)}
+                    onClick={() =>
+                      navigate(`/student/assignments/${item.id}`, {
+                        state: { from: 'assignments', classId: item.class_id },
+                      })
+                    }
                     className="p-3 rounded-xl bg-slate-50 border-l-4 border-l-amber-500 border-y border-r border-brand-line/60 hover:bg-slate-100 transition-all cursor-pointer space-y-1"
                   >
                     <div className="flex items-center justify-between gap-2">

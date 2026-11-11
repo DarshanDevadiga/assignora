@@ -170,3 +170,135 @@ export function isDifferentDay(dateInputA, dateInputB) {
   )
 }
 
+/**
+ * Safely sanitize links to ensure valid absolute URLs for external domains
+ * or valid root-relative routes for internal application pages,
+ * preventing broken hostnames (e.g. https://student/...) or unvalidated schemes.
+ */
+export function sanitizeUrl(url) {
+  if (!url || typeof url !== 'string') return ''
+  const trimmed = url.trim()
+  if (!trimmed) return ''
+
+  // Valid absolute http/https protocol
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed
+  }
+
+  // Protocol-relative //cdn.example.com
+  if (trimmed.startsWith('//')) {
+    return `https:${trimmed}`
+  }
+
+  // Root-relative internal application routes like /admin/... or /student/...
+  if (trimmed.startsWith('/')) {
+    return trimmed
+  }
+
+  // Common external domain pattern without protocol: e.g. onedrive.live.com, 1drv.ms, drive.google.com, github.com
+  if (/^([a-z0-9]+(-[a-z0-9]+)*\.)+[a-z]{2,}(:\d+)?(\/.*)?$/i.test(trimmed)) {
+    return `https://${trimmed}`
+  }
+
+  // Default to https://
+  return `https://${trimmed}`
+}
+
+/**
+ * Intelligent Deliverable Resolver:
+ * Distinguishes true external deliverables (OneDrive, Google Drive, GitHub, etc.)
+ * from circular self-referential assignment URLs and course-level OneDrive folders.
+ * Guarantees that opening a deliverable never lands on a blank or dashboard route.
+ */
+export function resolveDeliverableUrl({
+  submissionLink,
+  onedriveLink,
+  driveLink,
+  assignmentId,
+  groupId,
+  classId,
+  userRole = 'admin',
+}) {
+  const trimmedSub = submissionLink ? String(submissionLink).trim() : ''
+  const trimmedOneDrive = onedriveLink ? String(onedriveLink).trim() : ''
+  const trimmedDrive = driveLink ? String(driveLink).trim() : ''
+
+  // Detect whether the link is self-referential (pointing back to the assignment page itself)
+  const isCircularAssignmentLink =
+    Boolean(trimmedSub) &&
+    (/(\/|^)(student|admin)?\/assignments\/[a-f0-9-]+/i.test(trimmedSub) ||
+      trimmedSub.includes('/student/assignments') ||
+      trimmedSub.includes('/admin/assignments'))
+
+  // 1. If a valid external deliverable link is provided (and is not a circular loop to the assignment page)
+  if (trimmedSub && !isCircularAssignmentLink) {
+    const sanitized = sanitizeUrl(trimmedSub)
+    return {
+      type: 'external',
+      url: sanitized,
+      label: 'Open Work in New Tab',
+      isDeliverable: true,
+      source: 'student_submission',
+    }
+  }
+
+  // 2. If the student submitted a circular assignment link but a course OneDrive folder exists,
+  // open the course OneDrive folder where group deliverables are housed
+  if (trimmedOneDrive) {
+    const sanitized = sanitizeUrl(trimmedOneDrive)
+    return {
+      type: 'onedrive',
+      url: sanitized,
+      label: 'Open Course OneDrive Folder',
+      isDeliverable: true,
+      source: 'course_onedrive',
+      note: isCircularAssignmentLink
+        ? 'Submitted link referenced the assignment page; opening course OneDrive folder.'
+        : undefined,
+    }
+  }
+
+  // 3. If a course Google Drive link exists
+  if (trimmedDrive) {
+    const sanitized = sanitizeUrl(trimmedDrive)
+    return {
+      type: 'drive',
+      url: sanitized,
+      label: 'Open Course Drive Folder',
+      isDeliverable: true,
+      source: 'course_drive',
+      note: isCircularAssignmentLink
+        ? 'Submitted link referenced the assignment page; opening course Google Drive folder.'
+        : undefined,
+    }
+  }
+
+  // 4. If it was a circular assignment URL and no external folder exists,
+  // ensure the link opens the proper role-aware internal assignment evaluation route
+  if (isCircularAssignmentLink && assignmentId) {
+    const rolePrefix = userRole === 'student' ? 'student' : 'admin'
+    const query = [groupId ? `groupId=${groupId}` : '', classId ? `classId=${classId}` : '']
+      .filter(Boolean)
+      .join('&')
+    const internalUrl = `/${rolePrefix}/assignments/${assignmentId}${query ? `?${query}` : ''}`
+    return {
+      type: 'internal_viewer',
+      url: internalUrl,
+      label: 'Open Assignment Work Details',
+      isDeliverable: false,
+      source: 'internal_route',
+      note: 'Self-referential link resolved to internal assignment view',
+    }
+  }
+
+  // 5. No deliverable exists
+  return {
+    type: 'none',
+    url: null,
+    label: 'No Deliverable Submitted',
+    isDeliverable: false,
+    source: 'none',
+  }
+}
+
+

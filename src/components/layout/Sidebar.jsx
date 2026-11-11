@@ -26,6 +26,7 @@ export default function Sidebar({
   const adminNav = [
     { name: 'Dashboard', path: '/admin', icon: Home, end: true },
     { name: 'Classes', path: '/admin/classes', icon: BookOpen },
+    { name: 'Assignments', path: '/admin/assignments', icon: ClipboardList },
     { name: 'Students', path: '/admin/students', icon: Users },
   ]
 
@@ -66,15 +67,15 @@ export default function Sidebar({
               to={item.path}
               end={item.end}
               onClick={onClose}
-              className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
                 isActive
-                  ? 'bg-brand-activeNav text-brand-primary font-semibold shadow-xs'
-                  : 'text-brand-muted hover:text-brand-heading hover:bg-slate-50'
+                  ? 'nav-active-glow text-brand-primary font-semibold shadow-xs'
+                  : 'text-brand-muted hover:text-brand-heading hover:bg-brand-secondaryBg/70'
               }`}
             >
               <Icon
-                className={`w-5 h-5 transition-colors ${
-                  isActive ? 'text-brand-primary' : 'text-slate-400'
+                className={`w-5 h-5 transition-transform duration-200 ${
+                  isActive ? 'text-brand-primary scale-105' : 'text-slate-400'
                 }`}
               />
               <span className="flex-1 truncate">{item.name}</span>

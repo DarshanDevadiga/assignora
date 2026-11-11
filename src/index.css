@@ -2,9 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --brand-primary: #5B21F6;
+  --brand-primary-rgb: 91, 33, 246;
+  --brand-secondary: #8B5CF6;
+  --brand-secondary-rgb: 139, 92, 246;
+  --brand-glow: rgba(91, 33, 246, 0.24);
+  --brand-glow-lg: 0 0 24px -2px rgba(91, 33, 246, 0.32);
+  --surface-primary: #FFFFFF;
+  --surface-secondary: #F8F9FF;
+  --surface-tertiary: #F5F3FF;
+  --surface-accent: #EDE9FE;
+  --border-subtle: #E2E8F0;
+  --border-brand: #DDD6FE;
+  --shadow-card: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.05);
+  --shadow-card-hover: 0 8px 24px -4px rgba(91, 33, 246, 0.12), 0 2px 6px -1px rgba(15, 23, 42, 0.06);
+}
+
 @layer base {
   body {
-    @apply bg-brand-bg text-brand-body font-sans;
+    @apply bg-brand-bg text-brand-body font-sans antialiased selection:bg-brand-light selection:text-brand-primary;
   }
 }
 
@@ -21,17 +38,129 @@
 ::-webkit-scrollbar-thumb {
   background: #CBD5E1;
   border-radius: 9999px;
+  transition: background-color 150ms ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: #94A3B8;
 }
 
-/* Glass & purple gradient accents matching reference banners */
+/* Glass & purple gradient accents */
 .purple-gradient-banner {
-  background: linear-gradient(135deg, #5B21F6 0%, #7C3AED 50%, #9333EA 100%);
+  background: linear-gradient(135deg, #5B21F6 0%, #6D28D9 45%, #7C3AED 75%, #9333EA 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+.purple-gradient-banner::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 50%;
+  background: radial-gradient(circle at top right, rgba(255, 255, 255, 0.18) 0%, transparent 70%);
+  pointer-events: none;
 }
 
 .purple-gradient-card {
-  background: linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%);
+  background: linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 60%, #E0E7FF 100%);
+}
+
+/* Premium Card with subtle border and inner light sheen */
+.card-premium {
+  background-color: #FFFFFF;
+  border: 1px solid rgba(221, 214, 254, 0.7);
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.04), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 200ms ease, border-color 200ms ease;
+}
+
+.card-premium-hover:hover {
+  transform: translate3d(0, -2px, 0);
+  border-color: rgba(139, 92, 246, 0.45);
+  box-shadow: 0 10px 28px -4px rgba(91, 33, 246, 0.12), 0 2px 6px -1px rgba(15, 23, 42, 0.05);
+}
+
+/* Modern Glass Panel with crisp border */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(221, 214, 254, 0.6);
+}
+
+/* Gradient Headings */
+.gradient-heading {
+  background: linear-gradient(135deg, #111827 0%, #1F2937 55%, #5B21F6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.gradient-heading-purple {
+  background: linear-gradient(135deg, #5B21F6 0%, #7C3AED 50%, #9333EA 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Glow Elements */
+.glow-primary {
+  box-shadow: 0 4px 16px 0 rgba(91, 33, 246, 0.28);
+}
+
+.glow-primary-hover {
+  transition: box-shadow 200ms ease, transform 150ms ease;
+}
+.glow-primary-hover:hover {
+  box-shadow: 0 6px 20px 0 rgba(91, 33, 246, 0.36);
+  transform: translate3d(0, -1px, 0);
+}
+.glow-primary-hover:active {
+  transform: translate3d(0, 0, 0) scale(0.99);
+}
+
+/* Active Nav Glow */
+.nav-active-glow {
+  background: linear-gradient(90deg, rgba(241, 237, 255, 0.95) 0%, rgba(245, 243, 255, 0.65) 100%);
+  border-left: 3px solid #5B21F6;
+  box-shadow: inset 0 0 12px -2px rgba(91, 33, 246, 0.10);
+}
+
+/* Shimmer Skeleton Wave */
+.skeleton-shimmer {
+  background: linear-gradient(90deg, #F1F5F9 0%, #EDE9FE 50%, #F1F5F9 100%);
+  background-size: 200% 100%;
+  animation: shimmerWave 1.8s infinite linear;
+}
+
+@keyframes shimmerWave {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Page enter transition */
+.page-enter {
+  animation: slideUp 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Modal entrance */
+.modal-enter {
+  animation: scaleUp 200ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Respect user's reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .page-enter,
+  .modal-enter,
+  .card-premium-hover:hover,
+  .glow-primary-hover:hover {
+    transform: none !important;
+  }
 }

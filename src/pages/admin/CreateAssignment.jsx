@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import React, { useState, useEffect, useMemo } from 'react'
+import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
   FileText,
@@ -38,6 +38,8 @@ import StudentSelectionModal from '../../components/admin/StudentSelectionModal'
 export default function CreateAssignment() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
   const { id: editAssignmentId } = useParams()
 
   const [classes, setClasses] = useState([])
@@ -81,7 +83,10 @@ export default function CreateAssignment() {
       const adminClasses = await classesService.getAdminClasses(user.id)
       setClasses(adminClasses)
 
-      if (adminClasses.length > 0 && !selectedClassId) {
+      const targetClassId = searchParams.get('classId') || location.state?.classId
+      if (targetClassId && adminClasses.some((c) => c.id === targetClassId)) {
+        setSelectedClassId(targetClassId)
+      } else if (adminClasses.length > 0 && !selectedClassId) {
         setSelectedClassId(adminClasses[0].id)
       }
 
@@ -200,7 +205,11 @@ export default function CreateAssignment() {
         })
       }
 
-      navigate('/admin/assignments')
+      if (location.state?.from === 'class' || searchParams.get('classId')) {
+        navigate(`/admin/classes/${selectedClassId}?tab=assignments`)
+      } else {
+        navigate('/admin/assignments')
+      }
     } catch (err) {
       console.error('[CreateAssignment] Error saving assignment:', err)
       setErrorMessage(err.message || 'Failed to save assignment. Please try again.')
@@ -208,6 +217,26 @@ export default function CreateAssignment() {
       setLoading(false)
     }
   }
+
+  // Context-aware back navigation (must execute at top level before any conditional return)
+  const backNavigation = useMemo(() => {
+    const navState = location.state || {}
+    const qClassId = searchParams.get('classId')
+    const effectiveClassId = navState.classId || qClassId || selectedClassId
+
+    if (navState.from === 'class' || qClassId) {
+      if (effectiveClassId) {
+        return {
+          path: `/admin/classes/${effectiveClassId}?tab=assignments`,
+          label: 'Back to Class Assignments',
+        }
+      }
+    }
+    return {
+      path: '/admin/assignments',
+      label: 'Back to Assignments',
+    }
+  }, [location.state, searchParams, selectedClassId])
 
   if (initialLoading) {
     return (
@@ -223,11 +252,11 @@ export default function CreateAssignment() {
       <div>
         <button
           type="button"
-          onClick={() => navigate('/admin/assignments')}
+          onClick={() => navigate(backNavigation.path)}
           className="inline-flex items-center gap-2 text-xs font-semibold text-brand-primary hover:text-brand-hover cursor-pointer mb-2"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Back to Assignments</span>
+          <span>{backNavigation.label}</span>
         </button>
 
         <h1 className="text-2xl sm:text-3xl font-bold text-brand-heading tracking-tight">

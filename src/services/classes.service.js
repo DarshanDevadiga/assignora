@@ -1,4 +1,5 @@
 import { supabase, supabaseUrl, supabaseAnonKey } from '../lib/supabase.js'
+import { authService } from './auth.service.js'
 
 export const classesService = {
   /**
@@ -360,68 +361,80 @@ export const classesService = {
     if (!rawCode) return null
     const cleanCode = rawCode.trim().toUpperCase().replace(/^CLS-/, '')
 
-    // 1. Try secure database function get_class_preview_by_code
+    // 1. Primary: Secure SECURITY DEFINER RPC get_class_preview_by_code (no 403 for unenrolled students)
     try {
       const { data: rpcRes, error: rpcErr } = await supabase.rpc('get_class_preview_by_code', {
         p_code: cleanCode,
       })
       if (!rpcErr && rpcRes?.success && rpcRes.class) {
-        return rpcRes.class
+        const cls = rpcRes.class
+        const teacherObj = cls.users || cls.teacher || { name: 'Course Instructor', email: '', avatar: null }
+        return {
+          ...cls,
+          users: teacherObj,
+          teacher: teacherObj,
+          student_count: typeof cls.student_count === 'number' ? cls.student_count : (cls.class_members?.length || 0),
+          is_enrolled: Boolean(cls.is_enrolled),
+        }
+      }
+      if (!rpcErr && rpcRes && rpcRes.success === false) {
+        return null
       }
     } catch (e) {
       console.warn('[classesService] get_class_preview_by_code RPC fallback:', e)
     }
 
-    // 2. Try direct query on classes table by class_code
+    // 2. Fallback: Direct query on accessible classes without nested class_members (avoids 403)
     try {
       const { data: directMatch, error: directErr } = await supabase
         .from('classes')
         .select(`
-          *,
-          users:admin_id (id, name, email, avatar),
-          class_members (id, student_id)
+          id,
+          name,
+          subject,
+          description,
+          class_code,
+          admin_id,
+          created_at,
+          users:admin_id (id, name, email, avatar)
         `)
         .eq('class_code', cleanCode)
         .maybeSingle()
 
-      if (!directErr && directMatch) return directMatch
+      if (!directErr && directMatch) {
+        return {
+          ...directMatch,
+          teacher: directMatch.users || null,
+          is_enrolled: false,
+        }
+      }
     } catch {
-      // column may not exist or blocked by RLS
+      // Blocked by RLS when unenrolled
     }
 
-    // 3. Try direct ID match if it's a UUID
+    // 3. Fallback: Try direct ID match if it's a UUID
     if (cleanCode.length === 36 && cleanCode.includes('-')) {
       const { data } = await supabase
         .from('classes')
         .select(`
-          *,
-          users:admin_id (id, name, email, avatar),
-          class_members (id, student_id)
+          id,
+          name,
+          subject,
+          description,
+          class_code,
+          admin_id,
+          created_at,
+          users:admin_id (id, name, email, avatar)
         `)
         .eq('id', rawCode.trim())
         .maybeSingle()
-      if (data) return data
-    }
-
-    // 4. Fallback: match by derived code across accessible classes
-    try {
-      const { data: allClasses } = await supabase
-        .from('classes')
-        .select(`
-          *,
-          users:admin_id (id, name, email, avatar),
-          class_members (id, student_id)
-        `)
-
-      if (allClasses && allClasses.length > 0) {
-        const matched = allClasses.find((c) => {
-          const derived = (c.class_code || c.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 6)).toUpperCase()
-          return derived === cleanCode || c.id === rawCode.trim()
-        })
-        if (matched) return matched
+      if (data) {
+        return {
+          ...data,
+          teacher: data.users || null,
+          is_enrolled: false,
+        }
       }
-    } catch (err) {
-      console.error('[classesService] Error in fallback class search:', err)
     }
 
     return null
@@ -438,60 +451,60 @@ export const classesService = {
 
     const cleanCode = rawCode.trim().toUpperCase().replace(/^CLS-/, '')
 
-    // 1. Primary method: secure join_class_by_code RPC
-    try {
-      const { data: rpcRes, error: rpcErr } = await supabase.rpc('join_class_by_code', {
-        p_code: cleanCode,
-      })
-
-      if (!rpcErr && rpcRes) {
-        if (rpcRes.success) {
-          return {
-            success: true,
-            classId: rpcRes.class_id,
-            className: rpcRes.class_name,
-            membershipId: rpcRes.membership_id,
-            message: rpcRes.message || 'Successfully joined class!',
-          }
-        }
-        if (rpcRes.already_member) {
-          throw new Error('You are already enrolled in this class.')
-        }
-        if (rpcRes.error) {
-          throw new Error(rpcRes.error)
-        }
-      }
-      if (rpcErr && rpcErr.code !== 'PGRST202') {
-        throw new Error(rpcErr.message || 'Failed to join class.')
-      }
-    } catch (err) {
-      if (
-        err.message?.includes('already enrolled') ||
-        err.message?.includes('Invalid class code') ||
-        err.message?.includes('Only student accounts')
-      ) {
-        throw err
-      }
-      console.warn('[classesService] join_class_by_code RPC failed or not present, trying fallback:', err)
-    }
-
-    // 2. Fallback method: find class then enroll
-    const cls = await this.findClassByCode(cleanCode)
-    if (!cls) {
-      throw new Error('Invalid class code. Please check with your teacher and try again.')
-    }
-
     const { data: authSession } = await supabase.auth.getSession()
     const studentId = authSession?.session?.user?.id
     if (!studentId) {
       throw new Error('You must be signed in to join a class.')
     }
 
-    await this.enrollStudent(cls.id, studentId, cleanCode)
+    // Ensure profile is verified/provisioned before invoking enrollment RPC
+    const profile = await authService.getUserProfile(studentId)
+    if (!profile) {
+      throw new Error('User profile not found. Please sign in again.')
+    }
+    if (profile.role !== 'student') {
+      throw new Error('Only student accounts can join classes with a class code.')
+    }
+
+    // Primary method: secure join_class_by_code RPC
+    const { data: rpcRes, error: rpcErr } = await supabase.rpc('join_class_by_code', {
+      p_code: cleanCode,
+    })
+
+    if (!rpcErr && rpcRes) {
+      if (rpcRes.success) {
+        return {
+          success: true,
+          classId: rpcRes.class_id,
+          className: rpcRes.class_name,
+          membershipId: rpcRes.membership_id,
+          message: rpcRes.message || 'Successfully joined class!',
+        }
+      }
+      if (rpcRes.already_member) {
+        throw new Error('You are already enrolled in this class.')
+      }
+      if (rpcRes.error) {
+        throw new Error(rpcRes.error)
+      }
+    }
+
+    if (rpcErr && rpcErr.code !== 'PGRST202') {
+      throw new Error(rpcErr.message || 'Failed to join class.')
+    }
+
+    // Fallback only if RPC function itself is missing (PGRST202)
+    const cls = await this.findClassByCode(cleanCode)
+    if (!cls) {
+      throw new Error('Invalid class code. Please check with your teacher and try again.')
+    }
+
+    const membership = await this.enrollStudent(cls.id, studentId, cleanCode)
     return {
       success: true,
       classId: cls.id,
       className: cls.name,
+      membershipId: membership?.id,
       message: 'Successfully joined class!',
     }
   },
@@ -513,7 +526,7 @@ export const classesService = {
   },
 
   /**
-   * Verify invitation token and return class ID if valid
+   * Verify invitation token and return class preview if valid
    */
   async verifyInviteToken(token) {
     if (!token) return { valid: false, error: 'Token is missing' }
@@ -535,12 +548,12 @@ export const classesService = {
       if (payload.exp && Date.now() > payload.exp) {
         return { valid: false, error: 'Invitation link has expired', expired: true }
       }
-      const cls = await this.getClassById(payload.cid)
+      const cls = await this.findClassByCode(payload.code || payload.cid)
       if (!cls) {
         return { valid: false, error: 'Class not found or disabled' }
       }
       return { valid: true, class: cls, classId: cls.id, expiresAt: new Date(payload.exp) }
-    } catch (err) {
+    } catch {
       // Fallback try as raw class code
       const cls = await this.findClassByCode(token)
       if (cls) {
@@ -551,76 +564,111 @@ export const classesService = {
   },
 
   /**
-   * Student enrolment into class (Strictly preserves active user session)
-   * Prevents duplicates and never switches account
+   * Student enrolment into class (Uses authenticated session, verifies profile & Student role,
+   * validates class & code, handles duplicates gracefully, and confirms persisted membership)
    */
   async enrollStudent(classId, studentId, classCode = null) {
-    if (!classId || !studentId) {
-      throw new Error('Class ID and Student ID are required')
+    if (!classId) {
+      throw new Error('Class ID is required.')
     }
 
-    // 1. Try secure RPC if code is provided
-    if (classCode) {
-      try {
-        const { data: rpcRes, error: rpcErr } = await supabase.rpc('join_class_by_code', {
-          p_code: classCode.trim().toUpperCase().replace(/^CLS-/, ''),
-        })
-        if (!rpcErr && rpcRes) {
-          if (rpcRes.success) {
-            return {
-              id: rpcRes.membership_id,
-              class_id: rpcRes.class_id,
-              student_id: studentId,
-            }
-          }
-          if (rpcRes.already_member) {
-            throw new Error('You are already enrolled in this class.')
-          }
-          if (rpcRes.error) {
-            throw new Error(rpcRes.error)
+    // 1. Verify authenticated session & match current user
+    const { data: sessionData, error: sessionErr } = await supabase.auth.getSession()
+    if (sessionErr) {
+      throw new Error('Failed to verify authentication session. Please sign in again.')
+    }
+    const currentUserId = sessionData?.session?.user?.id
+    if (!currentUserId) {
+      throw new Error('You must be signed in to join a class.')
+    }
+    if (studentId && currentUserId !== studentId) {
+      throw new Error('Unauthorized enrollment attempt: active session does not match user.')
+    }
+
+    // 2. Verify user profile and Student role (self-heals missing profiles)
+    const profile = await authService.getUserProfile(currentUserId)
+    if (!profile || !profile.role) {
+      throw new Error('Unable to verify your user profile. Please sign out and sign back in.')
+    }
+    if (profile.role !== 'student') {
+      throw new Error('Only student accounts can enroll in classes.')
+    }
+
+    // 3. Try secure join_class_by_code RPC (supports class code OR class UUID)
+    const lookupCode = (classCode || classId || '').toString().trim()
+    const normalizedCode = lookupCode.toUpperCase().replace(/^CLS-/, '')
+    if (normalizedCode) {
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('join_class_by_code', {
+        p_code: normalizedCode.length <= 10 ? normalizedCode : lookupCode,
+      })
+
+      if (!rpcErr && rpcRes) {
+        if (rpcRes.success) {
+          // Retrieve resulting membership record to confirm persistence
+          const { data: confirmedRow } = await supabase
+            .from('class_members')
+            .select('id, class_id, student_id, joined_at')
+            .eq('class_id', rpcRes.class_id || classId)
+            .eq('student_id', currentUserId)
+            .maybeSingle()
+
+          return confirmedRow || {
+            id: rpcRes.membership_id,
+            class_id: rpcRes.class_id || classId,
+            student_id: currentUserId,
           }
         }
-      } catch (err) {
-        if (err.message?.includes('already enrolled') || err.message?.includes('Invalid class code')) {
-          throw err
+        if (rpcRes.already_member) {
+          throw new Error('You are already enrolled in this class.')
         }
+        if (rpcRes.error) {
+          throw new Error(rpcRes.error)
+        }
+      }
+
+      if (rpcErr && rpcErr.code !== 'PGRST202') {
+        throw new Error(rpcErr.message || 'Failed to complete enrolment.')
       }
     }
 
-    // 2. Check if already enrolled in local database
+    // 4. Fallback direct membership check & insert (when RPC unavailable or UUID-only without RPC)
     const { data: existing, error: exErr } = await supabase
       .from('class_members')
       .select('id')
       .eq('class_id', classId)
-      .eq('student_id', studentId)
+      .eq('student_id', currentUserId)
       .maybeSingle()
+
+    if (exErr && exErr.code !== 'PGRST116') {
+      throw new Error(exErr.message || 'Failed to verify existing enrollment.')
+    }
 
     if (existing) {
       throw new Error('You are already enrolled in this class.')
     }
 
-    // 3. Direct insert using current student session (no account switching)
     const { data: newMember, error: insertError } = await supabase
       .from('class_members')
       .insert({
         class_id: classId,
-        student_id: studentId,
+        student_id: currentUserId,
       })
-      .select(`
-        id,
-        class_id,
-        student_id,
-        joined_at,
-        users:student_id (id, name, email, avatar, student_id)
-      `)
+      .select('id, class_id, student_id, joined_at')
       .maybeSingle()
 
     if (insertError) {
-      if (insertError.code === '23505') {
+      if (insertError.code === '23505' || insertError.message?.includes('duplicate key')) {
         throw new Error('You are already enrolled in this class.')
+      }
+      if (insertError.code === '42501' || insertError.message?.includes('row-level security')) {
+        throw new Error('Enrollment blocked by class permissions. Please verify your class code and student profile.')
       }
       console.error('[classesService] Direct insert error:', insertError)
       throw new Error(insertError.message || 'Failed to complete enrolment. Please check with your teacher.')
+    }
+
+    if (!newMember) {
+      throw new Error('Enrollment could not be confirmed. Please try again.')
     }
 
     return newMember

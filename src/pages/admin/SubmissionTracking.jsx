@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import {
   ArrowLeft,
   Users,
@@ -32,7 +32,9 @@ import {
   isSubmissionLate,
   formatDisplayDate,
   calculateLetterGrade,
-  exportToCSV
+  exportToCSV,
+  sanitizeUrl,
+  resolveDeliverableUrl
 } from '../../utils/calculations'
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
@@ -40,10 +42,13 @@ import Badge from '../../components/common/Badge'
 import ProgressBar from '../../components/common/ProgressBar'
 import Modal from '../../components/common/Modal'
 import { Input, Textarea } from '../../components/common/Input'
+import SubmittedWorkViewerModal from '../../components/submission/SubmittedWorkViewerModal'
+import GroupSubmissionCard from '../../components/submission/GroupSubmissionCard'
 
 export default function SubmissionTracking() {
   const { id: paramAssignmentId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
   const { user } = useAuth()
   const navigate = useNavigate()
 
@@ -76,6 +81,10 @@ export default function SubmissionTracking() {
   const [groupModalFeedback, setGroupModalFeedback] = useState('')
   const [savingGroupGrade, setSavingGroupGrade] = useState(false)
   const [groupGradeError, setGroupGradeError] = useState('')
+
+  // Dedicated Submitted Work Viewer State (Separate from Grading Modal)
+  const [isSubmittedWorkModalOpen, setIsSubmittedWorkModalOpen] = useState(false)
+  const [submittedWorkData, setSubmittedWorkData] = useState(null)
 
   // Sync parameter assignment ID if route changes
   useEffect(() => {
@@ -117,25 +126,55 @@ export default function SubmissionTracking() {
   async function loadAssignmentDetails(id) {
     try {
       const details = await assignmentsService.getAssignmentById(id)
-      setCurrentAssignment(details)
+      let grps = []
+      let gSubs = []
       if (details?.class_id) {
-        const grps = await groupsService.getCourseGroups(details.class_id)
-        setCourseGroups(grps)
+        const [loadedGrps, loadedSubs] = await Promise.all([
+          groupsService.getCourseGroups(details.class_id),
+          details.submission_type === 'group'
+            ? groupsService.getAllGroupSubmissionsForAssignment(id)
+            : Promise.resolve([])
+        ])
+        grps = loadedGrps || []
+        gSubs = loadedSubs || []
       }
-      if (details?.submission_type === 'group') {
-        const gSubs = await groupsService.getAllGroupSubmissionsForAssignment(id)
-        setGroupSubmissions(gSubs)
-      } else {
-        setGroupSubmissions([])
-      }
+      setCurrentAssignment(details)
+      setCourseGroups(grps)
+      setGroupSubmissions(gSubs)
     } catch (err) {
       console.error('[SubmissionTracking] Error loading assignment details:', err)
     }
   }
 
   const handleSwitchAssignment = (newId) => {
+    setIsGroupDetailModalOpen(false)
+    setInspectedGroup(null)
+    setIsDetailModalOpen(false)
+    setInspectedStudent(null)
+    setIsSubmittedWorkModalOpen(false)
+    setSubmittedWorkData(null)
     setSelectedAssignmentId(newId)
     navigate(`/admin/assignments/${newId}`)
+  }
+
+  // Open dedicated submitted work viewer (Separate from grading modal)
+  const handleOpenSubmittedWork = (row, isGroup = true) => {
+    const leaderName = isGroup ? (row.leaderName || row.leader?.name || row.sub?.leader?.name || 'Group Leader') : null
+    const submitterName = isGroup
+      ? (row.acknowledged_by || row.sub?.leader?.name || leaderName)
+      : (row.name || row.users?.name || 'Student')
+
+    setSubmittedWorkData({
+      assignment: currentAssignment,
+      group: isGroup ? { ...row, leaderName, acknowledged_by: submitterName } : null,
+      student: !isGroup ? row : null,
+      submission: {
+        ...(row.sub || row.submission || row),
+        acknowledged_by_name: submitterName,
+      },
+      isGroup,
+    })
+    setIsSubmittedWorkModalOpen(true)
   }
 
   // Derive all assigned students and their submission records
@@ -254,8 +293,11 @@ export default function SubmissionTracking() {
 
     eligibleGroups.forEach((group) => {
       const sub = groupSubmissions.find((s) => s.group_id === group.id)
-      const isSub = Boolean(
+      const hasAcknowledged = Boolean(
         sub && (sub.acknowledged_at || sub.status === 'submitted' || sub.status === 'reviewed')
+      )
+      const hasDeliverable = Boolean(
+        sub && sub.submission_link && sub.submission_link.trim() !== ''
       )
       const isGraded = Boolean(
         sub && (sub.status === 'reviewed' || (sub.marks !== null && sub.marks !== undefined))
@@ -270,8 +312,21 @@ export default function SubmissionTracking() {
       )
 
       const memberList = group.members?.map((m) => m.user?.name || m.users?.name || m.name).filter(Boolean) || []
-      const leaderName = group.leader?.name || sub?.leader?.name || 'Leader'
-      const acknowledgedByName = sub?.leader?.name || group.leader?.name || 'Leader'
+      const leaderName = group.leader?.name || sub?.leader?.name || 'Group Leader'
+      const acknowledgedByName = sub?.leader?.name || group.leader?.name || leaderName
+
+      if (sub) {
+        sub.acknowledged_by_name = acknowledgedByName
+      }
+
+      let submissionStatus = 'pending'
+      if (isGraded) {
+        submissionStatus = 'graded'
+      } else if (hasAcknowledged) {
+        submissionStatus = isLate ? 'late' : hasDeliverable ? 'submitted' : 'acknowledged'
+      } else if (isAssignmentOverdue) {
+        submissionStatus = 'overdue'
+      }
 
       const rowData = {
         id: group.id,
@@ -281,28 +336,22 @@ export default function SubmissionTracking() {
         members: group.members || [],
         memberNames: memberList,
         sub,
-        isSubmitted: isSub,
+        isSubmitted: hasAcknowledged,
+        hasDeliverable,
         isGraded,
         isLate,
         acknowledged_by: acknowledgedByName,
+        acknowledged_by_name: acknowledgedByName,
         acknowledged_at: sub?.acknowledged_at || null,
         submission_link: sub?.submission_link || null,
         marks: rawMarks,
         letterGrade,
         feedback: sub?.feedback || '',
         comment: sub?.comment || '',
-        status: isGraded
-          ? 'graded'
-          : isSub
-          ? isLate
-            ? 'late'
-            : 'submitted'
-          : isAssignmentOverdue
-          ? 'overdue'
-          : 'pending',
+        status: submissionStatus,
       }
 
-      if (isSub) {
+      if (hasAcknowledged) {
         submitted.push(rowData)
       } else {
         notSubmitted.push(rowData)
@@ -338,8 +387,9 @@ export default function SubmissionTracking() {
     }
   }, [groupRows, searchQuery])
 
-  // Open Group Grading Modal
+  // Explicitly Open Group Grading Modal (Deliberate user action only)
   const openGroupGradingModal = (groupRow) => {
+    if (!groupRow) return
     setInspectedGroup(groupRow)
     setGroupModalMarks(
       groupRow.marks !== null && groupRow.marks !== undefined && groupRow.marks !== '—'
@@ -351,32 +401,17 @@ export default function SubmissionTracking() {
     setIsGroupDetailModalOpen(true)
   }
 
-  // Close Group Grading Modal and clear groupId query param
+  // Explicitly Close Group Grading Modal
   const handleCloseGroupModal = () => {
     setIsGroupDetailModalOpen(false)
+    setInspectedGroup(null)
+    setGroupGradeError('')
     if (searchParams.get('groupId')) {
       const newParams = new URLSearchParams(searchParams)
       newParams.delete('groupId')
       setSearchParams(newParams, { replace: true })
     }
   }
-
-  // Auto-inspect group if groupId is passed via URL query parameters
-  const targetGroupId = searchParams.get('groupId')
-  useEffect(() => {
-    if (
-      targetGroupId &&
-      isGroupAssignment &&
-      (groupRows.submitted.length > 0 || groupRows.notSubmitted.length > 0)
-    ) {
-      const match =
-        groupRows.submitted.find((g) => g.id === targetGroupId) ||
-        groupRows.notSubmitted.find((g) => g.id === targetGroupId)
-      if (match && (!inspectedGroup || inspectedGroup.id !== match.id)) {
-        openGroupGradingModal(match)
-      }
-    }
-  }, [targetGroupId, isGroupAssignment, groupRows])
 
   // Save / Update Group Grade in Supabase
   const handleSaveGroupGrade = async (e) => {
@@ -622,39 +657,95 @@ export default function SubmissionTracking() {
     )
   }
 
+  // Context-aware back navigation
+  const backNavigation = useMemo(() => {
+    const navState = location.state || {}
+    const qGroupId = searchParams.get('groupId')
+    const qClassId = searchParams.get('classId')
+    const effectiveClassId = navState.classId || qClassId || currentAssignment?.class_id
+    const effectiveGroupId = navState.groupId || qGroupId
+
+    // 1. Opened from a group or group tracking context
+    if (navState.from === 'group' || navState.from === 'group_tracking' || qGroupId) {
+      if (effectiveClassId && effectiveGroupId) {
+        return {
+          path: `/admin/classes/${effectiveClassId}/groups/${effectiveGroupId}?tab=assignments`,
+          label: 'Back to Group',
+        }
+      }
+      if (effectiveClassId) {
+        return {
+          path: `/admin/classes/${effectiveClassId}?tab=groups`,
+          label: 'Back to Group Submissions',
+        }
+      }
+    }
+
+    // 2. Opened from a class assignments tab or direct URL with class
+    if (navState.from === 'class' || qClassId || (!navState.from && currentAssignment?.class_id)) {
+      if (effectiveClassId) {
+        return {
+          path: `/admin/classes/${effectiveClassId}?tab=assignments`,
+          label: 'Back to Class Assignments',
+        }
+      }
+    }
+
+    // 3. Opened from global assignments
+    if (navState.from === 'assignments') {
+      return {
+        path: '/admin/assignments',
+        label: 'Back to Assignments',
+      }
+    }
+
+    // 4. Safe fallback
+    if (currentAssignment?.class_id) {
+      return {
+        path: `/admin/classes/${currentAssignment.class_id}?tab=assignments`,
+        label: 'Back to Class Assignments',
+      }
+    }
+
+    return {
+      path: '/admin/assignments',
+      label: 'Back to Assignments',
+    }
+  }, [location.state, searchParams, currentAssignment?.class_id])
+
   return (
     <div className="space-y-6">
       {/* Back button and page title */}
-      <div>
+      <div className="space-y-3">
         <button
           type="button"
-          onClick={() => navigate('/admin/assignments')}
-          className="inline-flex items-center gap-2 text-xs font-semibold text-brand-primary hover:text-brand-hover cursor-pointer mb-2"
+          onClick={() => navigate(backNavigation.path)}
+          className="inline-flex items-center gap-2 text-xs font-semibold text-brand-primary hover:text-brand-hover cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Back to Assignments</span>
+          <span>{backNavigation.label}</span>
         </button>
 
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-brand-heading tracking-tight">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-brand-heading tracking-tight">
               Assignment Details & Submissions
             </h1>
-            <p className="text-xs sm:text-sm text-brand-muted mt-1">
+            <p className="text-xs sm:text-sm text-brand-muted mt-1 max-w-2xl">
               Evaluate student deliverables, record scores and feedback, and monitor class completion.
             </p>
           </div>
 
           {/* Assignment Switcher Dropdown */}
           {assignments.length > 1 && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 shrink-0 w-full lg:w-auto">
               <label className="text-xs font-bold text-brand-heading shrink-0">
                 Switch Assignment:
               </label>
               <select
                 value={selectedAssignmentId}
                 onChange={(e) => handleSwitchAssignment(e.target.value)}
-                className="rounded-input border border-brand-line bg-white px-3 py-2 text-xs sm:text-sm font-semibold text-brand-heading focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20 cursor-pointer min-w-[200px]"
+                className="w-full sm:w-auto min-w-[220px] max-w-full sm:max-w-xs rounded-input border border-brand-line bg-white px-3 py-2 text-xs sm:text-sm font-semibold text-brand-heading focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20 cursor-pointer shadow-2xs"
               >
                 {assignments.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -671,7 +762,7 @@ export default function SubmissionTracking() {
         <>
           {/* Assignment Header Summary Banner */}
           <Card padding="p-5 sm:p-6" className="shadow-card space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-brand-line/60 pb-4">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-brand-line/60 pb-4">
               <div className="flex items-start gap-3.5 min-w-0">
                 <div className="w-11 h-11 rounded-2xl bg-brand-light text-brand-primary flex items-center justify-center shrink-0 shadow-xs">
                   <FileText className="w-6 h-6" />
@@ -680,7 +771,7 @@ export default function SubmissionTracking() {
                   <h2 className="text-lg sm:text-xl font-bold text-brand-heading truncate">
                     {currentAssignment.title}
                   </h2>
-                  <p className="text-xs text-brand-muted mt-0.5 flex items-center gap-2 flex-wrap">
+                  <div className="text-xs text-brand-muted mt-1 flex items-center gap-2 flex-wrap">
                     <span className="font-semibold text-brand-heading">
                       {currentAssignment.classes?.name}
                     </span>
@@ -702,7 +793,7 @@ export default function SubmissionTracking() {
                     <Badge variant={currentAssignment.submission_type === 'group' ? 'primary' : 'neutral'} size="sm">
                       {currentAssignment.submission_type === 'group' ? 'Group Assignment' : 'Individual Assignment'}
                     </Badge>
-                  </p>
+                  </div>
                 </div>
               </div>
 
@@ -718,10 +809,10 @@ export default function SubmissionTracking() {
                 </Button>
                 {currentAssignment.drive_link && (
                   <a
-                    href={currentAssignment.drive_link}
+                    href={sanitizeUrl(currentAssignment.drive_link)}
                     target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-primary bg-brand-light hover:bg-brand-border/60 px-3 py-2 rounded-btn"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-primary bg-brand-light hover:bg-brand-border/60 px-3 py-2 rounded-btn transition-colors"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                     <span>Google Drive</span>
@@ -729,10 +820,10 @@ export default function SubmissionTracking() {
                 )}
                 {currentAssignment.onedrive_link && (
                   <a
-                    href={currentAssignment.onedrive_link}
+                    href={sanitizeUrl(currentAssignment.onedrive_link)}
                     target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100/60 px-3 py-2 rounded-btn"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 hover:bg-blue-100/60 px-3 py-2 rounded-btn transition-colors"
                   >
                     <Cloud className="w-3.5 h-3.5 text-blue-600" />
                     <span>OneDrive</span>
@@ -762,77 +853,77 @@ export default function SubmissionTracking() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                   {/* Total Eligible Groups */}
-                  <div className="p-3.5 rounded-xl bg-slate-50 border border-brand-line/60 flex items-center gap-3">
+                  <div className="p-3.5 sm:p-4 rounded-xl bg-slate-50 border border-brand-line/60 flex items-center gap-3 h-full shadow-2xs">
                     <div className="w-9 h-9 rounded-lg bg-purple-100 text-brand-primary flex items-center justify-center shrink-0">
                       <Users className="w-4 h-4" />
                     </div>
-                    <div>
-                      <div className="text-lg font-extrabold text-brand-heading leading-none">
+                    <div className="min-w-0">
+                      <div className="text-lg sm:text-xl font-extrabold text-brand-heading leading-none">
                         {totalEligibleGroups}
                       </div>
-                      <div className="text-[11px] font-medium text-brand-muted mt-1">
+                      <div className="text-[11px] font-medium text-brand-muted mt-1 truncate">
                         Total Groups
                       </div>
                     </div>
                   </div>
 
                   {/* Acknowledged Groups */}
-                  <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-100 flex items-center gap-3">
+                  <div className="p-3.5 sm:p-4 rounded-xl bg-emerald-50/60 border border-emerald-100 flex items-center gap-3 h-full shadow-2xs">
                     <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
                       <CheckCircle2 className="w-4 h-4" />
                     </div>
-                    <div>
-                      <div className="text-lg font-extrabold text-emerald-700 leading-none">
+                    <div className="min-w-0">
+                      <div className="text-lg sm:text-xl font-extrabold text-emerald-700 leading-none">
                         {acknowledgedGroupsCount}
                       </div>
-                      <div className="text-[11px] font-medium text-emerald-600 mt-1">
+                      <div className="text-[11px] font-medium text-emerald-600 mt-1 truncate">
                         Acknowledged
                       </div>
                     </div>
                   </div>
 
                   {/* Unacknowledged Groups */}
-                  <div className="p-3.5 rounded-xl bg-amber-50/60 border border-amber-100 flex items-center gap-3">
+                  <div className="p-3.5 sm:p-4 rounded-xl bg-amber-50/60 border border-amber-100 flex items-center gap-3 h-full shadow-2xs">
                     <div className="w-9 h-9 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
                       <Clock className="w-4 h-4" />
                     </div>
-                    <div>
-                      <div className="text-lg font-extrabold text-amber-700 leading-none">
+                    <div className="min-w-0">
+                      <div className="text-lg sm:text-xl font-extrabold text-amber-700 leading-none">
                         {unacknowledgedGroupsCount}
                       </div>
-                      <div className="text-[11px] font-medium text-amber-600 mt-1">
+                      <div className="text-[11px] font-medium text-amber-600 mt-1 truncate">
                         Unacknowledged
                       </div>
                     </div>
                   </div>
 
                   {/* Graded Groups */}
-                  <div className="p-3.5 rounded-xl bg-purple-50/60 border border-purple-100 flex items-center gap-3">
+                  <div className="p-3.5 sm:p-4 rounded-xl bg-purple-50/60 border border-purple-100 flex items-center gap-3 h-full shadow-2xs">
                     <div className="w-9 h-9 rounded-lg bg-purple-100 text-brand-primary flex items-center justify-center shrink-0">
                       <Award className="w-4 h-4" />
                     </div>
-                    <div>
-                      <div className="text-lg font-extrabold text-purple-700 leading-none">
+                    <div className="min-w-0">
+                      <div className="text-lg sm:text-xl font-extrabold text-purple-700 leading-none">
                         {groupGradedCount}
                       </div>
-                      <div className="text-[11px] font-medium text-purple-600 mt-1">
+                      <div className="text-[11px] font-medium text-purple-600 mt-1 truncate">
                         Graded Groups
                       </div>
                     </div>
                   </div>
 
                   {/* Awaiting Grading */}
-                  <div className="p-3.5 rounded-xl bg-indigo-50/60 border border-indigo-100 flex items-center gap-3">
+                  <div className="p-3.5 sm:p-4 rounded-xl bg-indigo-50/60 border border-indigo-100 flex items-center gap-3 h-full shadow-2xs col-span-2 sm:col-span-1">
                     <div className="w-9 h-9 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
                       <Clock className="w-4 h-4" />
                     </div>
-                    <div>
-                      <div className="text-lg font-extrabold text-indigo-700 leading-none">
+                    <div className="min-w-0">
+                      <div className="text-lg sm:text-xl font-extrabold text-indigo-700 leading-none">
                         {groupAwaitingCount}
                       </div>
-                      <div className="text-[11px] font-medium text-indigo-600 mt-1">
+                      <div className="text-[11px] font-medium text-indigo-600 mt-1 truncate">
                         Awaiting Grading
                       </div>
                     </div>
@@ -841,92 +932,92 @@ export default function SubmissionTracking() {
               </div>
             ) : (
               /* 6 Summary Cards: Total, Submitted, Pending, Late, Graded, Awaiting Grading */
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 pt-1">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-1">
                 {/* Total Enrolled */}
-                <div className="p-3.5 rounded-xl bg-slate-50 border border-brand-line/60 flex items-center gap-3">
+                <div className="p-3.5 sm:p-4 rounded-xl bg-slate-50 border border-brand-line/60 flex items-center gap-3 h-full shadow-2xs">
                   <div className="w-9 h-9 rounded-lg bg-purple-100 text-brand-primary flex items-center justify-center shrink-0">
                     <Users className="w-4 h-4" />
                   </div>
-                  <div>
-                    <div className="text-lg font-extrabold text-brand-heading leading-none">
+                  <div className="min-w-0">
+                    <div className="text-lg sm:text-xl font-extrabold text-brand-heading leading-none">
                       {totalEligible}
                     </div>
-                    <div className="text-[11px] font-medium text-brand-muted mt-1">
+                    <div className="text-[11px] font-medium text-brand-muted mt-1 truncate">
                       Enrolled
                     </div>
                   </div>
                 </div>
 
                 {/* Submitted */}
-                <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-100 flex items-center gap-3">
+                <div className="p-3.5 sm:p-4 rounded-xl bg-emerald-50/60 border border-emerald-100 flex items-center gap-3 h-full shadow-2xs">
                   <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
                     <CheckCircle2 className="w-4 h-4" />
                   </div>
-                  <div>
-                    <div className="text-lg font-extrabold text-emerald-700 leading-none">
+                  <div className="min-w-0">
+                    <div className="text-lg sm:text-xl font-extrabold text-emerald-700 leading-none">
                       {submittedCount}
                     </div>
-                    <div className="text-[11px] font-medium text-emerald-600 mt-1">
+                    <div className="text-[11px] font-medium text-emerald-600 mt-1 truncate">
                       Submitted
                     </div>
                   </div>
                 </div>
 
                 {/* Pending */}
-                <div className="p-3.5 rounded-xl bg-amber-50/60 border border-amber-100 flex items-center gap-3">
+                <div className="p-3.5 sm:p-4 rounded-xl bg-amber-50/60 border border-amber-100 flex items-center gap-3 h-full shadow-2xs">
                   <div className="w-9 h-9 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
                     <Clock className="w-4 h-4" />
                   </div>
-                  <div>
-                    <div className="text-lg font-extrabold text-amber-700 leading-none">
+                  <div className="min-w-0">
+                    <div className="text-lg sm:text-xl font-extrabold text-amber-700 leading-none">
                       {pendingCount}
                     </div>
-                    <div className="text-[11px] font-medium text-amber-600 mt-1">
+                    <div className="text-[11px] font-medium text-amber-600 mt-1 truncate">
                       Pending
                     </div>
                   </div>
                 </div>
 
                 {/* Late Submissions */}
-                <div className="p-3.5 rounded-xl bg-rose-50/60 border border-rose-100 flex items-center gap-3">
+                <div className="p-3.5 sm:p-4 rounded-xl bg-rose-50/60 border border-rose-100 flex items-center gap-3 h-full shadow-2xs">
                   <div className="w-9 h-9 rounded-lg bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
                     <XCircle className="w-4 h-4" />
                   </div>
-                  <div>
-                    <div className="text-lg font-extrabold text-rose-700 leading-none">
+                  <div className="min-w-0">
+                    <div className="text-lg sm:text-xl font-extrabold text-rose-700 leading-none">
                       {lateCount}
                     </div>
-                    <div className="text-[11px] font-medium text-rose-600 mt-1">
+                    <div className="text-[11px] font-medium text-rose-600 mt-1 truncate">
                       Late Submissions
                     </div>
                   </div>
                 </div>
 
                 {/* Graded */}
-                <div className="p-3.5 rounded-xl bg-purple-50/60 border border-purple-100 flex items-center gap-3">
+                <div className="p-3.5 sm:p-4 rounded-xl bg-purple-50/60 border border-purple-100 flex items-center gap-3 h-full shadow-2xs">
                   <div className="w-9 h-9 rounded-lg bg-purple-100 text-brand-primary flex items-center justify-center shrink-0">
                     <Award className="w-4 h-4" />
                   </div>
-                  <div>
-                    <div className="text-lg font-extrabold text-purple-700 leading-none">
+                  <div className="min-w-0">
+                    <div className="text-lg sm:text-xl font-extrabold text-purple-700 leading-none">
                       {gradedCount}
                     </div>
-                    <div className="text-[11px] font-medium text-purple-600 mt-1">
+                    <div className="text-[11px] font-medium text-purple-600 mt-1 truncate">
                       Graded
                     </div>
                   </div>
                 </div>
 
                 {/* Awaiting Grading */}
-                <div className="p-3.5 rounded-xl bg-indigo-50/60 border border-indigo-100 flex items-center gap-3">
+                <div className="p-3.5 sm:p-4 rounded-xl bg-indigo-50/60 border border-indigo-100 flex items-center gap-3 h-full shadow-2xs">
                   <div className="w-9 h-9 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
                     <Clock className="w-4 h-4" />
                   </div>
-                  <div>
-                    <div className="text-lg font-extrabold text-indigo-700 leading-none">
+                  <div className="min-w-0">
+                    <div className="text-lg sm:text-xl font-extrabold text-indigo-700 leading-none">
                       {awaitingGradingCount}
                     </div>
-                    <div className="text-[11px] font-medium text-indigo-600 mt-1">
+                    <div className="text-[11px] font-medium text-indigo-600 mt-1 truncate">
                       Awaiting Grading
                     </div>
                   </div>
@@ -957,8 +1048,8 @@ export default function SubmissionTracking() {
                 </div>
               </div>
 
-              {/* LIST 1: SUBMITTED GROUPS */}
-              <div className="space-y-3">
+              {/* LIST 1: SUBMITTED GROUPS (MODERN CARD LAYOUT) */}
+              <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
@@ -971,172 +1062,36 @@ export default function SubmissionTracking() {
                   </Badge>
                 </div>
 
-                <Card padding="p-0" className="overflow-hidden shadow-card">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs sm:text-sm">
-                      <thead className="bg-slate-50/80 border-b border-brand-line/60 text-brand-muted uppercase text-[11px] font-bold">
-                        <tr>
-                          <th className="py-3 px-4">#</th>
-                          <th className="py-3 px-4">Group Name</th>
-                          <th className="py-3 px-4">Group Leader</th>
-                          <th className="py-3 px-4">Group Members</th>
-                          <th className="py-3 px-4">Acknowledged By</th>
-                          <th className="py-3 px-4">Acknowledgement Time</th>
-                          <th className="py-3 px-4">Deliverable</th>
-                          <th className="py-3 px-4">Marks</th>
-                          <th className="py-3 px-4">Grade</th>
-                          <th className="py-3 px-4">Feedback</th>
-                          <th className="py-3 px-4 text-right">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-brand-line/50">
-                        {filteredGroupRows.submitted.map((row, idx) => (
-                          <tr key={row.id} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="py-3.5 px-4 font-semibold text-slate-400">
-                              {idx + 1}
-                            </td>
-
-                            {/* Group Name */}
-                            <td className="py-3.5 px-4">
-                              <div className="flex items-center gap-2.5">
-                                <div className="w-8 h-8 rounded-lg bg-brand-light text-brand-primary flex items-center justify-center font-bold text-xs shrink-0">
-                                  <Users className="w-4 h-4" />
-                                </div>
-                                <div>
-                                  <p className="font-bold text-brand-heading">{row.name}</p>
-                                  <span className="text-[11px] text-brand-muted">
-                                    {row.memberNames.length} {row.memberNames.length === 1 ? 'member' : 'members'}
-                                  </span>
-                                </div>
-                              </div>
-                            </td>
-
-                            {/* Group Leader */}
-                            <td className="py-3.5 px-4">
-                              <span className="inline-flex items-center gap-1.5 font-semibold text-brand-heading">
-                                <Crown className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                                <span>{row.leaderName}</span>
-                              </span>
-                            </td>
-
-                            {/* Group Members */}
-                            <td className="py-3.5 px-4">
-                              <div className="flex items-center gap-1 flex-wrap max-w-xs">
-                                {row.memberNames.map((m, mIdx) => (
-                                  <span
-                                    key={mIdx}
-                                    className="inline-block px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700"
-                                  >
-                                    {m}
-                                  </span>
-                                ))}
-                              </div>
-                            </td>
-
-                            {/* Acknowledged By */}
-                            <td className="py-3.5 px-4 font-medium text-brand-heading">
-                              <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-xs font-semibold">
-                                <Check className="w-3.5 h-3.5" />
-                                {row.acknowledged_by}
-                              </span>
-                            </td>
-
-                            {/* Acknowledgement Timestamp */}
-                            <td className="py-3.5 px-4 text-brand-muted text-xs whitespace-nowrap">
-                              {row.acknowledged_at ? (
-                                <span>
-                                  {formatDisplayDate(row.acknowledged_at)},{' '}
-                                  {new Date(row.acknowledged_at).toLocaleTimeString([], {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                  })}
-                                </span>
-                              ) : (
-                                <span className="text-slate-400 font-medium">—</span>
-                              )}
-                            </td>
-
-                            {/* Submitted Deliverable */}
-                            <td className="py-3.5 px-4">
-                              {row.submission_link ? (
-                                <a
-                                  href={row.submission_link}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-primary hover:underline bg-brand-light px-2.5 py-1 rounded-lg truncate max-w-[170px]"
-                                >
-                                  <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                                  <span className="truncate">View Work</span>
-                                </a>
-                              ) : (
-                                <span className="text-slate-400 italic">No link</span>
-                              )}
-                            </td>
-
-                            {/* Marks */}
-                            <td className="py-3.5 px-4 font-bold text-center">
-                              {row.marks !== null ? (
-                                <span className="text-emerald-700 text-sm">{row.marks}</span>
-                              ) : (
-                                <span className="text-slate-400 font-normal italic">—</span>
-                              )}
-                            </td>
-
-                            {/* Letter Grade */}
-                            <td className="py-3.5 px-4 text-center">
-                              {row.isGraded ? (
-                                <span className="inline-block px-2 py-0.5 rounded-full text-xs font-black bg-purple-100 text-purple-800">
-                                  {row.letterGrade}
-                                </span>
-                              ) : (
-                                <span className="text-slate-400 font-normal italic">—</span>
-                              )}
-                            </td>
-
-                            {/* Feedback */}
-                            <td className="py-3.5 px-4 text-xs">
-                              {row.feedback ? (
-                                <span
-                                  className="text-brand-heading truncate block max-w-[130px] italic"
-                                  title={row.feedback}
-                                >
-                                  "{row.feedback}"
-                                </span>
-                              ) : (
-                                <span className="text-slate-400 italic">—</span>
-                              )}
-                            </td>
-
-                            {/* Action */}
-                            <td className="py-3.5 px-4 text-right">
-                              <Button
-                                variant={row.isGraded ? 'outline' : 'primary'}
-                                size="sm"
-                                icon={Award}
-                                className={!row.isGraded ? 'shadow-purple-glow font-semibold' : ''}
-                                onClick={() => openGroupGradingModal(row)}
-                              >
-                                {row.isGraded ? 'Edit Grade' : 'Grade Group'}
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-
-                        {filteredGroupRows.submitted.length === 0 && (
-                          <tr>
-                            <td colSpan={11} className="py-10 text-center text-xs text-brand-muted">
-                              No group submissions recorded yet.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
+                {filteredGroupRows.submitted.length > 0 ? (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    {filteredGroupRows.submitted.map((row) => (
+                      <GroupSubmissionCard
+                        key={row.id}
+                        group={row}
+                        submission={row.sub}
+                        assignment={currentAssignment}
+                        userRole={user?.role || 'admin'}
+                        isSubmitted={true}
+                        onViewWork={() => handleOpenSubmittedWork(row, true)}
+                        onGrade={() => openGroupGradingModal(row)}
+                      />
+                    ))}
                   </div>
-                </Card>
+                ) : (
+                  <Card className="p-8 text-center bg-slate-50 border border-brand-line/80 rounded-2xl">
+                    <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
+                      <Users className="w-6 h-6" />
+                    </div>
+                    <h4 className="text-sm font-bold text-brand-heading mb-1">No group submissions recorded yet</h4>
+                    <p className="text-xs text-brand-muted max-w-sm mx-auto">
+                      When groups acknowledge and submit deliverables for this assignment, their submission cards will appear here.
+                    </p>
+                  </Card>
+                )}
               </div>
 
-              {/* LIST 2: NOT SUBMITTED GROUPS */}
-              <div className="space-y-3">
+              {/* LIST 2: NOT SUBMITTED GROUPS (MODERN CARD LAYOUT) */}
+              <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="w-2.5 h-2.5 rounded-full bg-amber-500" />
@@ -1149,89 +1104,32 @@ export default function SubmissionTracking() {
                   </Badge>
                 </div>
 
-                <Card padding="p-0" className="overflow-hidden shadow-card">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs sm:text-sm">
-                      <thead className="bg-slate-50/80 border-b border-brand-line/60 text-brand-muted uppercase text-[11px] font-bold">
-                        <tr>
-                          <th className="py-3 px-4">#</th>
-                          <th className="py-3 px-4">Group Name</th>
-                          <th className="py-3 px-4">Group Leader</th>
-                          <th className="py-3 px-4">Group Members</th>
-                          <th className="py-3 px-4">Member Count</th>
-                          <th className="py-3 px-4 text-right">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-brand-line/50">
-                        {filteredGroupRows.notSubmitted.map((row, idx) => (
-                          <tr key={row.id} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="py-3.5 px-4 font-semibold text-slate-400">
-                              {idx + 1}
-                            </td>
-
-                            {/* Group Name */}
-                            <td className="py-3.5 px-4">
-                              <div className="flex items-center gap-2.5">
-                                <div className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center font-bold text-xs shrink-0">
-                                  <Users className="w-4 h-4" />
-                                </div>
-                                <span className="font-bold text-brand-heading">{row.name}</span>
-                              </div>
-                            </td>
-
-                            {/* Group Leader */}
-                            <td className="py-3.5 px-4">
-                              <span className="inline-flex items-center gap-1.5 font-semibold text-brand-heading">
-                                <Crown className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                                <span>{row.leaderName}</span>
-                              </span>
-                            </td>
-
-                            {/* Group Members */}
-                            <td className="py-3.5 px-4">
-                              <div className="flex items-center gap-1 flex-wrap max-w-sm">
-                                {row.memberNames.map((m, mIdx) => (
-                                  <span
-                                    key={mIdx}
-                                    className="inline-block px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700"
-                                  >
-                                    {m}
-                                  </span>
-                                ))}
-                              </div>
-                            </td>
-
-                            {/* Member Count */}
-                            <td className="py-3.5 px-4 font-medium text-brand-muted">
-                              {row.memberNames.length} {row.memberNames.length === 1 ? 'member' : 'members'}
-                            </td>
-
-                            {/* Pending Status */}
-                            <td className="py-3.5 px-4 text-right">
-                              {row.status === 'overdue' ? (
-                                <Badge variant="danger" size="sm" dot>
-                                  Missing (Overdue)
-                                </Badge>
-                              ) : (
-                                <Badge variant="warning" size="sm" dot>
-                                  Pending Submission
-                                </Badge>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-
-                        {filteredGroupRows.notSubmitted.length === 0 && (
-                          <tr>
-                            <td colSpan={6} className="py-10 text-center text-xs text-brand-muted">
-                              All course groups have acknowledged and submitted this assignment!
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
+                {filteredGroupRows.notSubmitted.length > 0 ? (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    {filteredGroupRows.notSubmitted.map((row) => (
+                      <GroupSubmissionCard
+                        key={row.id}
+                        group={row}
+                        submission={row.sub}
+                        assignment={currentAssignment}
+                        userRole={user?.role || 'admin'}
+                        isSubmitted={false}
+                        onViewWork={() => handleOpenSubmittedWork(row, true)}
+                        onGrade={() => openGroupGradingModal(row)}
+                      />
+                    ))}
                   </div>
-                </Card>
+                ) : (
+                  <Card className="p-8 text-center bg-emerald-50/50 border border-emerald-200/80 rounded-2xl">
+                    <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3">
+                      <CheckCircle2 className="w-6 h-6" />
+                    </div>
+                    <h4 className="text-sm font-bold text-emerald-950 mb-1">All course groups have submitted!</h4>
+                    <p className="text-xs text-emerald-800 max-w-sm mx-auto">
+                      Every enrolled group in this course has completed and acknowledged their submission for this assignment.
+                    </p>
+                  </Card>
+                )}
               </div>
             </div>
           ) : (
@@ -1337,16 +1235,16 @@ export default function SubmissionTracking() {
                   <table className="w-full text-left text-xs sm:text-sm">
                     <thead className="bg-slate-50/80 border-b border-brand-line/60 text-brand-muted uppercase text-[11px] font-bold">
                       <tr>
-                        <th className="py-3 px-4">#</th>
-                        <th className="py-3 px-4">Student</th>
-                        <th className="py-3 px-4">Status</th>
-                        <th className="py-3 px-4">Submitted At</th>
-                        <th className="py-3 px-4">Submitted Deliverable</th>
-                        <th className="py-3 px-4">Marks Obtained</th>
-                        <th className="py-3 px-4">Total Marks</th>
-                        <th className="py-3 px-4">Grade</th>
-                        <th className="py-3 px-4">Feedback</th>
-                        <th className="py-3 px-4 text-right">Action</th>
+                        <th className="py-3 px-4 text-left w-12">#</th>
+                        <th className="py-3 px-4 text-left min-w-[180px]">Student</th>
+                        <th className="py-3 px-4 text-left min-w-[120px]">Status</th>
+                        <th className="py-3 px-4 text-left min-w-[150px]">Submitted At</th>
+                        <th className="py-3 px-4 text-left min-w-[160px]">Work / Deliverable</th>
+                        <th className="py-3 px-4 text-center min-w-[90px]">Marks Obtained</th>
+                        <th className="py-3 px-4 text-center min-w-[80px]">Total Marks</th>
+                        <th className="py-3 px-4 text-center min-w-[80px]">Grade</th>
+                        <th className="py-3 px-4 text-left min-w-[140px]">Feedback</th>
+                        <th className="py-3 px-4 text-right min-w-[130px]">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-brand-line/50">
@@ -1440,28 +1338,54 @@ export default function SubmissionTracking() {
                               )}
                             </td>
 
-                            {/* Submitted Deliverable */}
+                            {/* Submitted Deliverable / Work */}
                             <td className="py-3.5 px-4">
-                              {row.submission_link ? (
-                                <a
-                                  href={row.submission_link}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-primary hover:underline bg-brand-light px-2.5 py-1 rounded-lg truncate max-w-[180px]"
-                                >
-                                  <ExternalLink className="w-3.5 h-3.5 shrink-0" />
-                                  <span className="truncate">View Work</span>
-                                </a>
-                              ) : row.studentNote ? (
-                                <span
-                                  className="text-xs text-brand-heading truncate block max-w-[150px]"
-                                  title={row.studentNote}
-                                >
-                                  Note: {row.studentNote}
-                                </span>
-                              ) : (
-                                <span className="text-slate-400 font-medium">—</span>
-                              )}
+                              {(() => {
+                                const rowDeliverable = resolveDeliverableUrl({
+                                  submissionLink: row.submission_link,
+                                  onedriveLink: currentAssignment?.onedrive_link,
+                                  driveLink: currentAssignment?.drive_link,
+                                  assignmentId: currentAssignment?.id,
+                                  classId: currentAssignment?.class_id,
+                                  userRole: user?.role || 'admin',
+                                })
+                                return (
+                                  <div className="flex items-center gap-2">
+                                    {row.isSubmitted ? (
+                                      <Button
+                                        variant="primary"
+                                        size="sm"
+                                        icon={Eye}
+                                        onClick={() => handleOpenSubmittedWork(row, false)}
+                                        className="font-semibold text-xs shadow-purple-glow cursor-pointer"
+                                      >
+                                        View Work
+                                      </Button>
+                                    ) : (
+                                      <span className="text-slate-400 italic text-xs">Not submitted</span>
+                                    )}
+                                    {rowDeliverable.url && (
+                                      <a
+                                        href={rowDeliverable.url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand-primary hover:text-brand-hover p-1.5 rounded-lg hover:bg-brand-light transition-colors"
+                                        title={rowDeliverable.label}
+                                      >
+                                        <ExternalLink className="w-3.5 h-3.5" />
+                                      </a>
+                                    )}
+                                    {row.studentNote && (
+                                      <span
+                                        className="text-xs text-brand-heading truncate block max-w-[130px] italic"
+                                        title={row.studentNote}
+                                      >
+                                        "{row.studentNote}"
+                                      </span>
+                                    )}
+                                  </div>
+                                )
+                              })()}
                             </td>
 
                             {/* Marks Obtained */}
@@ -1610,20 +1534,44 @@ export default function SubmissionTracking() {
                 </div>
               )}
 
-              {inspectedStudent.submission_link && (
-                <div className="pt-2 border-t border-brand-line/60 flex items-center justify-between gap-3">
-                  <span className="text-brand-muted">Deliverable Link:</span>
-                  <a
-                    href={inspectedStudent.submission_link}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-brand-primary font-bold hover:underline"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Open Work in New Tab</span>
-                  </a>
-                </div>
-              )}
+              {(() => {
+                const studentDeliverable = resolveDeliverableUrl({
+                  submissionLink: inspectedStudent.submission_link,
+                  onedriveLink: currentAssignment?.onedrive_link,
+                  driveLink: currentAssignment?.drive_link,
+                  assignmentId: currentAssignment?.id,
+                  classId: currentAssignment?.class_id,
+                  userRole: user?.role || 'admin',
+                })
+
+                return (
+                  <>
+                    <div className="pt-2 border-t border-brand-line/60 flex items-center justify-between gap-3">
+                      <span className="text-brand-muted">Deliverable Link:</span>
+                      {studentDeliverable.url ? (
+                        <a
+                          href={studentDeliverable.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-primary text-white font-bold hover:bg-brand-primaryHover transition-all shadow-xs text-xs"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>{studentDeliverable.label}</span>
+                        </a>
+                      ) : (
+                        <span className="text-slate-400 italic text-[11px]">
+                          No deliverable link submitted (Acknowledgement record only)
+                        </span>
+                      )}
+                    </div>
+                    {studentDeliverable.note && (
+                      <p className="text-[11px] text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200">
+                        {studentDeliverable.note}
+                      </p>
+                    )}
+                  </>
+                )
+              })()}
 
               {inspectedStudent.studentNote && (
                 <div className="pt-2 border-t border-brand-line/60 space-y-1">
@@ -1744,7 +1692,9 @@ export default function SubmissionTracking() {
                     inspectedGroup.isGraded
                       ? 'success'
                       : inspectedGroup.isSubmitted
-                      ? 'primary'
+                      ? inspectedGroup.hasDeliverable
+                        ? 'primary'
+                        : 'info'
                       : 'warning'
                   }
                   size="sm"
@@ -1753,7 +1703,9 @@ export default function SubmissionTracking() {
                   {inspectedGroup.isGraded
                     ? `Graded (${inspectedGroup.marks} / ${currentAssignment?.points || 100})`
                     : inspectedGroup.isSubmitted
-                    ? 'Submitted'
+                    ? inspectedGroup.hasDeliverable
+                      ? 'Deliverable Submitted'
+                      : 'Acknowledged (No Deliverable Attached)'
                     : 'Pending Submission'}
                 </Badge>
               </div>
@@ -1769,7 +1721,12 @@ export default function SubmissionTracking() {
               {inspectedGroup.acknowledged_by && (
                 <div className="flex items-center justify-between">
                   <span className="text-brand-muted">Acknowledged By:</span>
-                  <span className="font-semibold text-emerald-700">{inspectedGroup.acknowledged_by}</span>
+                  <span className="font-semibold text-emerald-700">
+                    {inspectedGroup.acknowledged_by_name ||
+                      (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(inspectedGroup.acknowledged_by)
+                        ? inspectedGroup.acknowledged_by
+                        : inspectedGroup.leaderName || 'Group Leader')}
+                  </span>
                 </div>
               )}
 
@@ -1786,33 +1743,55 @@ export default function SubmissionTracking() {
                 </div>
               )}
 
-              {inspectedGroup.submission_link ? (
-                <div className="pt-2 border-t border-brand-line/60 flex items-center justify-between gap-3">
-                  <span className="text-brand-muted font-medium">Submitted Deliverable:</span>
-                  <a
-                    href={inspectedGroup.submission_link}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-primary text-white font-bold hover:bg-brand-primaryHover transition-all shadow-xs"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Open Work in New Tab</span>
-                  </a>
-                </div>
-              ) : (
-                <div className="pt-2 border-t border-brand-line/60 flex items-center justify-between text-slate-400 italic">
-                  <span>Submitted Deliverable:</span>
-                  <span>No deliverable link submitted</span>
-                </div>
-              )}
+              {(() => {
+                const groupDeliverable = resolveDeliverableUrl({
+                  submissionLink: inspectedGroup.submission_link,
+                  onedriveLink: currentAssignment?.onedrive_link,
+                  driveLink: currentAssignment?.drive_link,
+                  assignmentId: currentAssignment?.id,
+                  groupId: inspectedGroup.id,
+                  classId: currentAssignment?.class_id,
+                  userRole: user?.role || 'admin',
+                })
+
+                return (
+                  <>
+                    <div className="pt-2 border-t border-brand-line/60 flex items-center justify-between gap-3">
+                      <span className="text-brand-muted font-medium">Submitted Deliverable:</span>
+                      {groupDeliverable.url ? (
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={groupDeliverable.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-primary text-white font-bold hover:bg-brand-primaryHover transition-all shadow-xs text-xs"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>{groupDeliverable.label}</span>
+                          </a>
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 italic text-[11px]">
+                          No deliverable link submitted (Acknowledgement record only)
+                        </span>
+                      )}
+                    </div>
+                    {groupDeliverable.note && (
+                      <p className="text-[11px] text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200">
+                        {groupDeliverable.note}
+                      </p>
+                    )}
+                  </>
+                )
+              })()}
 
               {currentAssignment?.onedrive_link && (
                 <div className="pt-2 border-t border-brand-line/60 flex items-center justify-between gap-3">
                   <span className="text-brand-muted font-medium">Course OneDrive:</span>
                   <a
-                    href={currentAssignment.onedrive_link}
+                    href={sanitizeUrl(currentAssignment.onedrive_link)}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 text-blue-600 font-bold hover:underline"
                   >
                     <Cloud className="w-3.5 h-3.5" />
@@ -1913,6 +1892,23 @@ export default function SubmissionTracking() {
           </form>
         </Modal>
       )}
+
+      {/* Dedicated Submitted Work Viewer Modal (View real deliverables, PDF previews, OneDrive & documents) */}
+      <SubmittedWorkViewerModal
+        isOpen={isSubmittedWorkModalOpen}
+        onClose={() => {
+          setIsSubmittedWorkModalOpen(false)
+          setSubmittedWorkData(null)
+        }}
+        data={submittedWorkData}
+        onOpenGrading={(target) => {
+          if (submittedWorkData?.isGroup) {
+            openGroupGradingModal(target)
+          } else {
+            openGradingModal(target)
+          }
+        }}
+      />
     </div>
   )
 }

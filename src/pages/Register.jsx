@@ -56,6 +56,10 @@ export default function Register() {
       setErrorMessage('Password must be at least 6 characters long.')
       return
     }
+    if (role === 'admin' && !facultyToken.trim()) {
+      setErrorMessage('Professor registration requires a valid Faculty Invitation Token issued by academic administration.')
+      return
+    }
 
     try {
       setLoading(true)
@@ -69,11 +73,12 @@ export default function Register() {
       })
 
       if (res?.session) {
-        // Logged in immediately
-        navigate(role === 'admin' ? '/admin' : '/student', { replace: true })
+        // Logged in immediately using verified server profile role
+        const confirmedRole = res?.profile?.role || 'student'
+        navigate(confirmedRole === 'admin' ? '/admin' : '/student', { replace: true })
       } else {
         setSuccessMessage(
-          'Registration submitted successfully! If email confirmation is enabled for your domain, please check your inbox to activate your account.'
+          'Registration submitted successfully! Please check your email inbox and click the confirmation link to activate your account.'
         )
       }
     } catch (err) {
@@ -214,19 +219,20 @@ export default function Register() {
             {role === 'admin' && (
               <div className="space-y-1">
                 <Input
-                  label="Faculty Invitation Token (Optional in Demo)"
+                  label="Faculty Invitation Token"
                   type="text"
+                  required
                   icon={KeyRound}
                   value={facultyToken}
                   onChange={(e) => {
                     setFacultyToken(e.target.value)
                     if (errorMessage) setErrorMessage('')
                   }}
-                  placeholder="e.g. FAC-DEMO-2026 or leave blank"
+                  placeholder="Enter your FAC-... invitation token"
                 />
                 <p className="text-[11px] text-brand-muted flex items-center gap-1.5 pt-0.5">
                   <ShieldCheck className="w-3.5 h-3.5 text-brand-primary shrink-0" />
-                  <span>Optional in demo mode. In strict institutional deployments, tokens are issued by your administrator.</span>
+                  <span>A valid Faculty Invitation Token issued by your department administrator is required for Professor accounts.</span>
                 </p>
               </div>
             )}

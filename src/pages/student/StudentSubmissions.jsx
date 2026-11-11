@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { submissionsService } from '../../services/submissions.service'
-import { formatDisplayDate } from '../../utils/calculations'
+import { formatDisplayDate, sanitizeUrl } from '../../utils/calculations'
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
@@ -92,9 +92,9 @@ export default function StudentSubmissions() {
                 {sub.submission_link && (
                   <div className="pt-1">
                     <a
-                      href={sub.submission_link}
+                      href={sanitizeUrl(sub.submission_link)}
                       target="_blank"
-                      rel="noreferrer"
+                      rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-primary hover:underline bg-brand-light px-2.5 py-1 rounded-lg"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
@@ -109,7 +109,11 @@ export default function StudentSubmissions() {
                   variant="outline"
                   size="sm"
                   icon={Eye}
-                  onClick={() => navigate(`/student/assignments/${sub.assignment_id}`)}
+                  onClick={() =>
+                    navigate(`/student/assignments/${sub.assignment_id}`, {
+                      state: { from: 'assignments', classId: sub.assignment?.class_id },
+                    })
+                  }
                 >
                   View Details
                 </Button>

@@ -579,12 +579,14 @@ export const groupsService = {
    *    every group member must be assigned. If not allocated, the assignment is excluded.
    * 4. Excludes other groups' submissions; displays only this group's acknowledgement status.
    */
-  async getGroupAssignmentHistory(classId, groupId) {
+  async getGroupAssignmentHistory(classId, groupId, forceRefresh = false) {
     if (!classId || !groupId) return []
 
     const cacheKey = `groupAssignments:${classId}:${groupId}`
-    const cached = getCached(cacheKey)
-    if (cached) return cached
+    if (!forceRefresh) {
+      const cached = getCached(cacheKey)
+      if (cached) return cached
+    }
 
     try {
       // 1. Fetch group members for this group to check allocation eligibility
@@ -671,7 +673,7 @@ export const groupsService = {
       return result
     } catch (err) {
       console.error('[groupsService] getGroupAssignmentHistory exception:', err)
-      return []
+      throw err
     }
   },
 

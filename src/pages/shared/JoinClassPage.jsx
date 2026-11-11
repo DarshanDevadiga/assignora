@@ -90,13 +90,19 @@ export default function JoinClassPage() {
   }
 
   const handleAcceptInvitation = async () => {
-    if (!classInfo || !user?.id) return
+    if (!classInfo || !user?.id) {
+      setError('You must be signed in as a student to accept this invitation.')
+      return
+    }
 
     try {
       setJoining(true)
       setError(null)
-      const currentCode = manualCode || queryValue || classInfo.class_code || ''
-      await classesService.enrollStudent(classInfo.id, user.id, currentCode)
+      const currentCode = classInfo.class_code || manualCode || queryValue || ''
+      const membership = await classesService.enrollStudent(classInfo.id, user.id, currentCode)
+      if (!membership || (!membership.id && !membership.class_id)) {
+        throw new Error('Enrollment could not be confirmed. Please try again.')
+      }
       setInvitationStatus('accepted')
 
       setTimeout(() => {
@@ -204,21 +210,21 @@ export default function JoinClassPage() {
 
                 <div className="pt-3 border-t border-white/20 flex items-center justify-between text-xs text-white/90">
                   <span>Enrolment Code: <strong className="font-mono">CLS-{classesService.getClassCode(classInfo)}</strong></span>
-                  <span>{classInfo.class_members?.length || 0} Students</span>
+                  <span>{classInfo.student_count ?? classInfo.class_members?.length ?? 0} Students</span>
                 </div>
               </div>
 
               {/* Instructor Information */}
               <div className="rounded-xl p-3.5 bg-slate-50 border border-brand-line flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-brand-light text-brand-primary flex items-center justify-center font-bold">
-                  {classInfo.users?.name?.charAt(0) || 'P'}
+                  {(classInfo.users?.name || classInfo.teacher?.name || 'P').charAt(0)}
                 </div>
                 <div className="min-w-0 flex-1">
                   <span className="text-[11px] text-brand-muted block">Class Instructor</span>
                   <strong className="text-xs text-brand-heading truncate block">
-                    {classInfo.users?.name || 'Prof. Anitha R.'}
+                    {classInfo.users?.name || classInfo.teacher?.name || 'Faculty Instructor'}
                   </strong>
-                  <span className="text-[11px] text-brand-muted">{classInfo.users?.email}</span>
+                  <span className="text-[11px] text-brand-muted">{classInfo.users?.email || classInfo.teacher?.email || ''}</span>
                 </div>
               </div>
 

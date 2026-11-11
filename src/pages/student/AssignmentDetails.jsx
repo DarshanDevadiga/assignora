@@ -1,9 +1,8 @@
-import React, { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   ArrowLeft,
   FileText,
-  Calendar,
   Clock,
   ExternalLink,
   Send,
@@ -11,14 +10,15 @@ import {
   AlertCircle,
   Link2,
   FolderOpen,
-  Sparkles,
   Lock,
   Cloud,
   Users,
   Crown,
   Layers,
-  Shield,
-  UserPlus
+  UserPlus,
+  UploadCloud,
+  Eye,
+  X
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { assignmentsService } from '../../services/assignments.service'
@@ -27,7 +27,8 @@ import { groupsService } from '../../services/groups.service'
 import {
   formatDisplayDate,
   formatDeadlineBadge,
-  calculateLetterGrade
+  calculateLetterGrade,
+  sanitizeUrl
 } from '../../utils/calculations'
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
@@ -36,11 +37,14 @@ import Modal from '../../components/common/Modal'
 import { Input, Textarea } from '../../components/common/Input'
 import TwoStepSubmissionModal from '../../components/student/TwoStepSubmissionModal'
 import GroupManagementModal from '../../components/group/GroupManagementModal'
+import SubmittedWorkViewerModal from '../../components/submission/SubmittedWorkViewerModal'
+import GroupSubmissionCard from '../../components/submission/GroupSubmissionCard'
 
 export default function AssignmentDetails() {
   const { id: assignmentId } = useParams()
   const { user } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
 
   const [assignment, setAssignment] = useState(null)
   const [submission, setSubmission] = useState(null)
@@ -61,15 +65,101 @@ export default function AssignmentDetails() {
   // Submission inputs
   const [submissionLink, setSubmissionLink] = useState('')
   const [comment, setComment] = useState('')
+  const [submissionMode, setSubmissionMode] = useState('link') // 'link' | 'file'
+  const [selectedFile, setSelectedFile] = useState(null)
+  const [fileReading, setFileReading] = useState(false)
+  const [isViewerOpen, setIsViewerOpen] = useState(false)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [submittingGroup, setSubmittingGroup] = useState(false)
 
-  useEffect(() => {
-    loadAssignmentAndSubmission()
-  }, [assignmentId, user?.id])
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 15 * 1024 * 1024) {
+      setErrorMessage('File size exceeds 15 MB limit. Please provide a OneDrive or Google Drive link for larger files.')
+      return
+    }
+    setFileReading(true)
+    const reader = new FileReader()
+    reader.onload = () => {
+      setSelectedFile({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      })
+      setSubmissionLink(reader.result)
+      setFileReading(false)
+      setErrorMessage('')
+    }
+    reader.onerror = () => {
+      setErrorMessage('Failed to read file from your device. Please try again or provide a cloud link.')
+      setFileReading(false)
+    }
+    reader.readAsDataURL(file)
+  }
 
-  async function loadAssignmentAndSubmission() {
+  const handleClearSelectedFile = () => {
+    setSelectedFile(null)
+    setSubmissionLink('')
+  }
+
+  // Context-aware back navigation (must execute at top level before any conditional return)
+  const backNavigation = useMemo(() => {
+    const navState = location.state || {}
+    const queryParams = new URLSearchParams(location.search)
+    const effectiveClassId = navState.classId || queryParams.get('classId') || assignment?.class_id
+
+    // 1. Opened from a group
+    if (navState.from === 'group' || queryParams.get('groupId')) {
+      const gid = navState.groupId || queryParams.get('groupId') || studentGroup?.id
+      if (effectiveClassId && gid) {
+        return {
+          path: `/student/classes/${effectiveClassId}/groups/${gid}?tab=assignments`,
+          label: 'Back to Group',
+        }
+      }
+      if (effectiveClassId) {
+        return {
+          path: `/student/classes/${effectiveClassId}?tab=groups`,
+          label: 'Back to Group',
+        }
+      }
+    }
+
+    // 2. Opened from a class or direct URL / refresh with assignment.class_id
+    if (navState.from === 'class' || queryParams.get('classId') || (!navState.from && assignment?.class_id)) {
+      if (effectiveClassId) {
+        return {
+          path: `/student/classes/${effectiveClassId}?tab=assignments`,
+          label: 'Back to Class Assignments',
+        }
+      }
+    }
+
+    // 3. Opened from global assignments
+    if (navState.from === 'assignments') {
+      return {
+        path: '/student',
+        label: 'Back to Assignments',
+      }
+    }
+
+    // 4. Safe fallback
+    if (assignment?.class_id) {
+      return {
+        path: `/student/classes/${assignment.class_id}?tab=assignments`,
+        label: 'Back to Class Assignments',
+      }
+    }
+
+    return {
+      path: '/student',
+      label: 'Back to Assignments',
+    }
+  }, [location.state, location.search, assignment?.class_id, studentGroup?.id])
+
+  const loadAssignmentAndSubmission = useCallback(async () => {
     if (!assignmentId || !user?.id) return
     try {
       setLoading(true)
@@ -85,7 +175,25 @@ export default function AssignmentDetails() {
         setMembershipState('loading_membership')
         try {
           // Authoritative lookup using class_id and user.id (auth user UUID)
-          const grp = await groupsService.getStudentGroupInCourse(assignmentData.class_id, user.id)
+          let grp = await groupsService.getStudentGroupInCourse(assignmentData.class_id, user.id)
+
+          // Fallback: If not found by course lookup, check if groupId was passed in navigation state/query
+          const routeGroupId = location.state?.groupId || new URLSearchParams(location.search).get('groupId')
+          if (!grp && routeGroupId) {
+            try {
+              const explicitGrp = await groupsService.getGroupById(routeGroupId)
+              if (
+                explicitGrp &&
+                explicitGrp.class_id === assignmentData.class_id &&
+                explicitGrp.members?.some((m) => (m.student_id || m.user?.id) === user.id)
+              ) {
+                grp = explicitGrp
+              }
+            } catch (fallbackErr) {
+              console.warn('[AssignmentDetails] Fallback group lookup notice:', fallbackErr)
+            }
+          }
+
           if (grp && grp.id) {
             setStudentGroup(grp)
             setMembershipState('membership_found')
@@ -121,13 +229,17 @@ export default function AssignmentDetails() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [assignmentId, user?.id, location.state, location.search])
+
+  useEffect(() => {
+    loadAssignmentAndSubmission()
+  }, [loadAssignmentAndSubmission])
 
   // Individual Step 1: Open Two-Step Confirmation Modal
   const handleOpenConfirmModal = (e) => {
     e.preventDefault()
     if (!submissionLink.trim()) {
-      setErrorMessage('Please provide a Google Drive, GitHub, or live deployment link.')
+      setErrorMessage('Please upload a deliverable file or provide a cloud link (Google Drive / GitHub / OneDrive).')
       return
     }
     setErrorMessage('')
@@ -158,7 +270,7 @@ export default function AssignmentDetails() {
       return
     }
     if (!submissionLink.trim()) {
-      setErrorMessage('Please provide a submission link (OneDrive, Google Drive, or GitHub).')
+      setErrorMessage('Please upload a deliverable file or provide a project submission link (OneDrive, Google Drive, or GitHub).')
       return
     }
     setErrorMessage('')
@@ -193,8 +305,13 @@ export default function AssignmentDetails() {
 
   if (loading) {
     return (
-      <div className="py-20 text-center text-sm text-brand-muted">
-        Loading assignment...
+      <div className="space-y-6 max-w-5xl mx-auto page-enter">
+        <div className="h-6 w-36 skeleton-shimmer rounded-md border border-brand-border/40" />
+        <div className="h-28 skeleton-shimmer rounded-2xl border border-brand-border/40 shadow-xs" />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 h-72 skeleton-shimmer rounded-2xl border border-brand-border/40 shadow-xs" />
+          <div className="h-72 skeleton-shimmer rounded-2xl border border-brand-border/40 shadow-xs" />
+        </div>
       </div>
     )
   }
@@ -238,11 +355,11 @@ export default function AssignmentDetails() {
       <div>
         <button
           type="button"
-          onClick={() => navigate('/student')}
+          onClick={() => navigate(backNavigation.path)}
           className="inline-flex items-center gap-2 text-xs font-semibold text-brand-primary hover:text-brand-hover cursor-pointer mb-2"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Back to Assignments</span>
+          <span>{backNavigation.label}</span>
         </button>
 
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -545,74 +662,29 @@ export default function AssignmentDetails() {
                   </div>
 
                   {isGroupAcknowledged ? (
-                    /* Group has already acknowledged */
-                    <div className="space-y-4 py-1">
-                      <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 space-y-1.5">
-                        <div className="flex items-center gap-2 font-bold text-sm">
-                          <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                          <span>Group Assignment Acknowledged</span>
-                        </div>
-                        <p className="text-xs text-emerald-700">
-                          Acknowledged by <strong>{groupSubmission.leader?.name || studentGroup.leader?.name || 'Group Leader'}</strong> on{' '}
-                          {formatDisplayDate(groupSubmission.acknowledged_at)} at{' '}
-                          {new Date(groupSubmission.acknowledged_at).toLocaleTimeString([], {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}.
-                        </p>
-                      </div>
-
-                      {/* Graded Card if reviewed */}
-                      {isGraded && (
-                        <div className="p-4 rounded-xl bg-purple-50 border border-purple-200 text-purple-900 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="font-bold text-sm flex items-center gap-1.5">
-                              <CheckCircle2 className="w-4 h-4 text-brand-primary" />
-                              <span>Awarded Marks: {awardedMarks} / {assignment.points} pts</span>
-                            </span>
-                            <span className="text-xs font-black bg-purple-200 text-purple-900 px-2.5 py-0.5 rounded-full">
-                              Grade {letterGrade}
-                            </span>
-                          </div>
-                          {groupSubmission.feedback && (
-                            <div className="pt-2 border-t border-purple-200/80">
-                              <span className="text-[11px] font-bold text-purple-700 block">Instructor Feedback:</span>
-                              <p className="text-xs text-purple-900 italic mt-0.5">
-                                "{groupSubmission.feedback}"
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Submission Link & Notes */}
-                      {groupSubmission.submission_link && (
-                        <div className="space-y-1">
-                          <span className="text-xs font-semibold text-brand-heading">Submission Link:</span>
-                          <div className="p-3 rounded-xl bg-slate-50 border border-brand-line text-xs font-medium text-brand-primary flex items-center justify-between gap-2">
-                            <span className="truncate">{groupSubmission.submission_link}</span>
-                            <a
-                              href={groupSubmission.submission_link}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="p-1 text-slate-400 hover:text-brand-heading shrink-0"
-                            >
-                              <ExternalLink className="w-4 h-4" />
-                            </a>
-                          </div>
-                        </div>
-                      )}
-
-                      {groupSubmission.comment && (
-                        <div className="space-y-1">
-                          <span className="text-xs font-semibold text-brand-heading">Leader Submission Notes:</span>
-                          <p className="text-xs text-brand-muted bg-slate-50 p-3 rounded-xl border border-brand-line">
-                            {groupSubmission.comment}
-                          </p>
-                        </div>
-                      )}
-
-                      <div className="pt-1 text-center text-xs text-slate-400 flex items-center justify-center gap-1.5">
+                    /* Unified Group Submission Card for Student */
+                    <div className="space-y-3">
+                      <GroupSubmissionCard
+                        group={{
+                          ...studentGroup,
+                          leaderName:
+                            groupSubmission.leader?.name ||
+                            groupSubmission.leader_name ||
+                            studentGroup.leader?.name ||
+                            user?.name,
+                          acknowledged_by_name:
+                            groupSubmission.leader?.name ||
+                            groupSubmission.leader_name ||
+                            studentGroup.leader?.name ||
+                            user?.name,
+                        }}
+                        submission={groupSubmission}
+                        assignment={assignment}
+                        userRole="student"
+                        isSubmitted={true}
+                        onViewWork={() => setIsViewerOpen(true)}
+                      />
+                      <div className="text-center text-xs text-slate-400 flex items-center justify-center gap-1.5">
                         <Lock className="w-3.5 h-3.5" />
                         <span>All group members share this verified acknowledgement record.</span>
                       </div>
@@ -641,15 +713,100 @@ export default function AssignmentDetails() {
                         <span>You are the Group Leader. You are authorized to submit for your entire team.</span>
                       </div>
 
-                      <Input
-                        label="Project Submission Link"
-                        placeholder="https://1drv.ms/... or https://drive.google.com/..."
-                        required
-                        icon={Link2}
-                        value={submissionLink}
-                        onChange={(e) => setSubmissionLink(e.target.value)}
-                        helperText="Provide the OneDrive, Google Drive, or repository link for your group work."
-                      />
+                      {/* Mode Selector: Cloud Link vs File Upload */}
+                      <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-xl w-fit">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSubmissionMode('link')
+                            if (selectedFile) handleClearSelectedFile()
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            submissionMode === 'link'
+                              ? 'bg-white text-brand-primary shadow-xs'
+                              : 'text-brand-muted hover:text-brand-heading'
+                          }`}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <Link2 className="w-3.5 h-3.5" />
+                            <span>OneDrive / Cloud Link</span>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSubmissionMode('file')
+                            setSubmissionLink('')
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            submissionMode === 'file'
+                              ? 'bg-white text-brand-primary shadow-xs'
+                              : 'text-brand-muted hover:text-brand-heading'
+                          }`}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <UploadCloud className="w-3.5 h-3.5" />
+                            <span>Upload Document (PDF / Office)</span>
+                          </span>
+                        </button>
+                      </div>
+
+                      {submissionMode === 'link' ? (
+                        <Input
+                          label="Project Submission Link"
+                          placeholder="https://1drv.ms/... or https://drive.google.com/..."
+                          required
+                          icon={Link2}
+                          value={submissionLink}
+                          onChange={(e) => setSubmissionLink(e.target.value)}
+                          helperText="Provide the OneDrive, Google Drive, or repository link for your group work."
+                        />
+                      ) : (
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-brand-heading">
+                            Attach Deliverable Document (PDF, Word, Excel, PPT)
+                          </label>
+                          {selectedFile ? (
+                            <div className="p-3.5 rounded-xl bg-purple-50 border border-purple-200 flex items-center justify-between gap-3 text-xs">
+                              <div className="flex items-center gap-2.5 truncate">
+                                <FileText className="w-5 h-5 text-brand-primary shrink-0" />
+                                <div className="truncate">
+                                  <span className="font-bold text-brand-heading block truncate">{selectedFile.name}</span>
+                                  <span className="text-[11px] text-brand-muted">
+                                    {(selectedFile.size / 1024).toFixed(1)} KB • Document Attached
+                                  </span>
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                icon={X}
+                                onClick={handleClearSelectedFile}
+                                className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          ) : (
+                            <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-brand-border/70 hover:border-brand-primary rounded-xl cursor-pointer bg-slate-50/60 hover:bg-brand-light/20 transition-all text-center">
+                              <UploadCloud className="w-7 h-7 text-brand-primary mb-2" />
+                              <span className="text-xs font-bold text-brand-heading">
+                                {fileReading ? 'Reading document...' : 'Click to select or drop deliverable file'}
+                              </span>
+                              <span className="text-[11px] text-brand-muted mt-1">
+                                Supports PDF, DOCX, PPTX, XLSX, TXT up to 15 MB
+                              </span>
+                              <input
+                                type="file"
+                                onChange={handleFileSelect}
+                                accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.zip"
+                                className="hidden"
+                              />
+                            </label>
+                          )}
+                        </div>
+                      )}
 
                       <Textarea
                         label="Group Submission Comments (Optional)"
@@ -747,17 +904,31 @@ export default function AssignmentDetails() {
                   )}
 
                   <div className="space-y-2">
-                    <span className="text-xs font-semibold text-brand-heading">Submission Link:</span>
+                    <span className="text-xs font-semibold text-brand-heading">Submitted Deliverable:</span>
                     <div className="p-3 rounded-xl bg-slate-50 border border-brand-line text-xs font-medium text-brand-primary flex items-center justify-between gap-2">
-                      <span className="truncate">{submission.submission_link}</span>
-                      <a
-                        href={submission.submission_link}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="p-1 text-slate-400 hover:text-brand-heading shrink-0"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                      </a>
+                      <span className="truncate">{submission.submission_link?.startsWith('data:') ? 'Attached Deliverable File' : submission.submission_link}</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <Button
+                          type="button"
+                          variant="primary"
+                          size="sm"
+                          icon={Eye}
+                          onClick={() => setIsViewerOpen(true)}
+                          className="font-semibold text-xs shadow-purple-glow cursor-pointer"
+                        >
+                          View Deliverable
+                        </Button>
+                        {!submission.submission_link?.startsWith('data:') && (
+                          <a
+                            href={sanitizeUrl(submission.submission_link)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1 text-slate-400 hover:text-brand-heading shrink-0"
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                          </a>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -784,15 +955,100 @@ export default function AssignmentDetails() {
                     </div>
                   )}
 
-                  <Input
-                    label="Submission Link (Google Drive / GitHub / Deployment)"
-                    placeholder="https://drive.google.com/... or https://myproject.vercel.app"
-                    required
-                    icon={Link2}
-                    value={submissionLink}
-                    onChange={(e) => setSubmissionLink(e.target.value)}
-                    helperText="Paste your completed project link or shared Drive folder."
-                  />
+                  {/* Mode Selector: Cloud Link vs File Upload */}
+                  <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-xl w-fit">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSubmissionMode('link')
+                        if (selectedFile) handleClearSelectedFile()
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        submissionMode === 'link'
+                          ? 'bg-white text-brand-primary shadow-xs'
+                          : 'text-brand-muted hover:text-brand-heading'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Link2 className="w-3.5 h-3.5" />
+                        <span>Cloud Link (Drive / GitHub / Live)</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSubmissionMode('file')
+                        setSubmissionLink('')
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        submissionMode === 'file'
+                          ? 'bg-white text-brand-primary shadow-xs'
+                          : 'text-brand-muted hover:text-brand-heading'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <UploadCloud className="w-3.5 h-3.5" />
+                        <span>Upload Document (PDF / Office)</span>
+                      </span>
+                    </button>
+                  </div>
+
+                  {submissionMode === 'link' ? (
+                    <Input
+                      label="Submission Link (Google Drive / GitHub / Deployment)"
+                      placeholder="https://drive.google.com/... or https://myproject.vercel.app"
+                      required
+                      icon={Link2}
+                      value={submissionLink}
+                      onChange={(e) => setSubmissionLink(e.target.value)}
+                      helperText="Paste your completed project link or shared Drive folder."
+                    />
+                  ) : (
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-brand-heading">
+                        Attach Deliverable Document (PDF, Word, Excel, PPT)
+                      </label>
+                      {selectedFile ? (
+                        <div className="p-3.5 rounded-xl bg-purple-50 border border-purple-200 flex items-center justify-between gap-3 text-xs">
+                          <div className="flex items-center gap-2.5 truncate">
+                            <FileText className="w-5 h-5 text-brand-primary shrink-0" />
+                            <div className="truncate">
+                              <span className="font-bold text-brand-heading block truncate">{selectedFile.name}</span>
+                              <span className="text-[11px] text-brand-muted">
+                                {(selectedFile.size / 1024).toFixed(1)} KB • Document Attached
+                              </span>
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            icon={X}
+                            onClick={handleClearSelectedFile}
+                            className="text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      ) : (
+                        <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-brand-border/70 hover:border-brand-primary rounded-xl cursor-pointer bg-slate-50/60 hover:bg-brand-light/20 transition-all text-center">
+                          <UploadCloud className="w-7 h-7 text-brand-primary mb-2" />
+                          <span className="text-xs font-bold text-brand-heading">
+                            {fileReading ? 'Reading document...' : 'Click to select or drop deliverable file'}
+                          </span>
+                          <span className="text-[11px] text-brand-muted mt-1">
+                            Supports PDF, DOCX, PPTX, XLSX, TXT up to 15 MB
+                          </span>
+                          <input
+                            type="file"
+                            onChange={handleFileSelect}
+                            accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.zip"
+                            className="hidden"
+                          />
+                        </label>
+                      )}
+                    </div>
+                  )}
 
                   <Textarea
                     label="Additional Comments / Notes (Optional)"
@@ -905,6 +1161,28 @@ export default function AssignmentDetails() {
           </div>
         </Modal>
       )}
+
+      {/* Dedicated Submitted Work Viewer Modal for Student Inspection */}
+      <SubmittedWorkViewerModal
+        isOpen={isViewerOpen}
+        onClose={() => setIsViewerOpen(false)}
+        data={{
+          assignment,
+          group: studentGroup
+            ? { ...studentGroup, leaderName: studentGroup.leader?.name || user?.name }
+            : null,
+          student: user,
+          submission: {
+            ...((assignment?.submission_type === 'group' ? groupSubmission : submission) || {}),
+            acknowledged_by_name:
+              groupSubmission?.leader?.name ||
+              groupSubmission?.leader_name ||
+              studentGroup?.leader?.name ||
+              user?.name,
+          },
+          isGroup: assignment?.submission_type === 'group',
+        }}
+      />
     </div>
   )
 }

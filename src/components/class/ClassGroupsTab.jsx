@@ -340,7 +340,7 @@ export default function ClassGroupsTab({
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-48 rounded-2xl bg-slate-100/80 animate-pulse border border-brand-line/60" />
+            <div key={i} className="h-48 rounded-2xl skeleton-shimmer border border-brand-border/40 shadow-xs" />
           ))}
         </div>
       ) : filteredGroups.length === 0 ? (
@@ -391,8 +391,8 @@ export default function ClassGroupsTab({
               <Card
                 key={g.id}
                 padding="p-5"
-                className={`flex flex-col justify-between space-y-4 shadow-card transition-all hover:shadow-card-hover ${
-                  isMyGroup ? 'ring-2 ring-brand-primary/40 bg-gradient-to-b from-purple-50/20 to-white' : ''
+                className={`flex flex-col justify-between space-y-4 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover hover:border-brand-primary/40 ${
+                  isMyGroup ? 'ring-2 ring-brand-primary/50 shadow-glow-sm bg-gradient-to-b from-purple-50/30 to-white' : ''
                 } ${isArchived ? 'opacity-80 bg-slate-50/50' : ''}`}
               >
                 <div className="space-y-3">

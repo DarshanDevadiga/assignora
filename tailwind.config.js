@@ -41,9 +41,44 @@ export default {
       },
       boxShadow: {
         'card': '0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05)',
-        'card-hover': '0 4px 6px -1px rgba(91, 33, 246, 0.08), 0 2px 4px -2px rgba(91, 33, 246, 0.06)',
-        'modal': '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-        'purple-glow': '0 4px 14px 0 rgba(91, 33, 246, 0.3)',
+        'card-hover': '0 8px 24px -4px rgba(91, 33, 246, 0.12), 0 2px 6px -1px rgba(15, 23, 42, 0.06)',
+        'card-elevated': '0 12px 32px -4px rgba(91, 33, 246, 0.10), 0 4px 12px -2px rgba(0, 0, 0, 0.05)',
+        'modal': '0 24px 38px -6px rgba(15, 23, 42, 0.16), 0 10px 16px -6px rgba(91, 33, 246, 0.08)',
+        'purple-glow': '0 4px 14px 0 rgba(91, 33, 246, 0.28)',
+        'glow-sm': '0 2px 8px 0 rgba(91, 33, 246, 0.20)',
+        'glow-md': '0 4px 16px 0 rgba(91, 33, 246, 0.28)',
+        'glow-lg': '0 8px 28px -2px rgba(91, 33, 246, 0.36)',
+        'glow-green': '0 2px 10px 0 rgba(16, 185, 129, 0.25)',
+        'glow-amber': '0 2px 10px 0 rgba(245, 158, 11, 0.25)',
+      },
+      animation: {
+        'fade-in': 'fadeIn 200ms ease-out forwards',
+        'slide-up': 'slideUp 240ms cubic-bezier(0.16, 1, 0.3, 1) forwards',
+        'scale-up': 'scaleUp 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards',
+        'shimmer': 'shimmerWave 2s infinite linear',
+        'subtle-pulse': 'pulseSubtle 2.5s ease-in-out infinite',
+      },
+      keyframes: {
+        fadeIn: {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+        slideUp: {
+          '0%': { opacity: '0', transform: 'translate3d(0, 8px, 0)' },
+          '100%': { opacity: '1', transform: 'translate3d(0, 0, 0)' },
+        },
+        scaleUp: {
+          '0%': { opacity: '0', transform: 'scale(0.96) translate3d(0, 4px, 0)' },
+          '100%': { opacity: '1', transform: 'scale(1) translate3d(0, 0, 0)' },
+        },
+        shimmerWave: {
+          '0%': { backgroundPosition: '-200% 0' },
+          '100%': { backgroundPosition: '200% 0' },
+        },
+        pulseSubtle: {
+          '0%, 100%': { opacity: '1', transform: 'scale(1)' },
+          '50%': { opacity: '0.88', transform: 'scale(0.985)' },
+        },
       },
       borderRadius: {
         'card': '14px',

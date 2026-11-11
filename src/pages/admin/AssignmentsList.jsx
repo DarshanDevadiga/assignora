@@ -367,7 +367,11 @@ export default function AssignmentsList() {
                     <Button
                       variant="primary"
                       size="sm"
-                      onClick={() => navigate(`/admin/assignments/${assignment.id}`)}
+                      onClick={() =>
+                        navigate(`/admin/assignments/${assignment.id}`, {
+                          state: { from: 'assignments', classId: assignment.class_id },
+                        })
+                      }
                       className="shadow-purple-glow font-semibold text-xs whitespace-nowrap"
                     >
                       Track Submissions
@@ -376,7 +380,11 @@ export default function AssignmentsList() {
                     <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={() => navigate(`/admin/assignments/${assignment.id}/edit`)}
+                        onClick={() =>
+                          navigate(`/admin/assignments/${assignment.id}/edit`, {
+                            state: { from: 'assignments', classId: assignment.class_id },
+                          })
+                        }
                         className="p-1.5 rounded-lg text-slate-400 hover:text-brand-heading hover:bg-white hover:shadow-xs transition-colors cursor-pointer"
                         title="Edit Assignment"
                         aria-label="Edit Assignment"

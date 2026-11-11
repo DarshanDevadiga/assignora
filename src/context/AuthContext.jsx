@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react'
 import { authService } from '../services/auth.service'
 import { groupsService } from '../services/groups.service'
+import { messagesService } from '../services/messages.service'
 import { supabase } from '../lib/supabase'
 
 const AuthContext = createContext(null)
@@ -49,9 +50,9 @@ export function AuthProvider({ children }) {
         if (session?.user && isMounted) {
           setAuthUser(session.user)
           // If we already have the profile for this user cached, don't block
-          if (!profileRef.current || profileRef.current.id !== session.user.id) {
-            const userProfile = await authService.getUserProfile(session.user.id)
-            if (isMounted) {
+          if (!profileRef.current || profileRef.current.id !== session.user.id || !profileRef.current.role) {
+            const userProfile = await authService.getUserProfile(session.user.id, true)
+            if (isMounted && userProfile) {
               setProfile(userProfile)
               try {
                 localStorage.setItem(
@@ -59,6 +60,9 @@ export function AuthProvider({ children }) {
                   JSON.stringify({ user: session.user, profile: userProfile })
                 )
               } catch (e) {}
+            } else if (isMounted && !userProfile) {
+              setProfile(null)
+              setError('User profile could not be loaded.')
             }
           }
         } else if (!session && isMounted) {
@@ -86,16 +90,21 @@ export function AuthProvider({ children }) {
         if (session?.user) {
           setAuthUser(session.user)
           // Only fetch if profile is not already loaded or belongs to another user
-          if (!profileRef.current || profileRef.current.id !== session.user.id) {
-            const userProfile = await authService.getUserProfile(session.user.id)
-            if (isMounted) {
-              setProfile(userProfile)
-              try {
-                localStorage.setItem(
-                  CACHE_KEY,
-                  JSON.stringify({ user: session.user, profile: userProfile })
-                )
-              } catch (e) {}
+          if (!profileRef.current || profileRef.current.id !== session.user.id || !profileRef.current.role) {
+            try {
+              const userProfile = await authService.getUserProfile(session.user.id, true)
+              if (isMounted && userProfile) {
+                setProfile(userProfile)
+                try {
+                  localStorage.setItem(
+                    CACHE_KEY,
+                    JSON.stringify({ user: session.user, profile: userProfile })
+                  )
+                } catch (e) {}
+              }
+            } catch (profErr) {
+              console.error('[AuthContext] Auth state profile fetch error:', profErr)
+              if (isMounted) setError(profErr.message)
             }
           }
         }
@@ -167,6 +176,10 @@ export function AuthProvider({ children }) {
     } catch (e) {}
 
     try {
+      messagesService.cleanupRealtime()
+    } catch (e) {}
+
+    try {
       supabase.removeAllChannels()
     } catch (e) {}
 
@@ -199,16 +212,16 @@ export function AuthProvider({ children }) {
     }
   }
 
-  // Combined user object for application consumption
+  // Combined user object for application consumption — never allow session without verified profile role
   const user = useMemo(() => {
-    if (!authUser) return null
+    if (!authUser || !profile || !profile.role) return null
     return {
       id: authUser.id,
       email: authUser.email,
-      name: profile?.name || authUser.user_metadata?.name || authUser.email?.split('@')[0],
-      role: profile?.role || 'student', // default student if profile not yet loaded
-      avatar: profile?.avatar || null,
-      student_id: profile?.student_id || null,
+      name: profile.name || authUser.user_metadata?.name || authUser.email?.split('@')[0],
+      role: profile.role,
+      avatar: profile.avatar || null,
+      student_id: profile.student_id || null,
       rawAuth: authUser,
       profile,
     }

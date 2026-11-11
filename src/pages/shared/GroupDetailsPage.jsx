@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useParams, useNavigate, Link, useLocation, useSearchParams } from 'react-router-dom'
 import {
   Users,
   Crown,
@@ -37,21 +37,32 @@ import {
   formatDisplayDate,
   formatMessageTime,
   formatMessageDateSeparator,
-  isDifferentDay
+  isDifferentDay,
+  sanitizeUrl
 } from '../../utils/calculations'
 
 export default function GroupDetailsPage() {
   const { classId: routeClassId, groupId } = useParams()
   const { user: currentUser } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
+
+  const initialTabFromNav = searchParams.get('tab') || location.state?.tab || 'overview'
 
   // Main Page State
   const [group, setGroup] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [activeTab, setActiveTab] = useState('overview') // 'overview', 'members', 'assignments', 'chat'
+  const [activeTab, setActiveTab] = useState(initialTabFromNav) // 'overview', 'members', 'assignments', 'chat'
+  
+  // Dedicated State Machine for Group Assignments
   const [assignmentHistory, setAssignmentHistory] = useState([])
-  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [loadingHistory, setLoadingHistory] = useState(true)
+  const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [historyError, setHistoryError] = useState(null)
+  const historyReqIdRef = useRef(0)
+
   const [pageFeedback, setPageFeedback] = useState({ type: '', text: '' })
   const [actionLoading, setActionLoading] = useState(false)
 
@@ -70,6 +81,17 @@ export default function GroupDetailsPage() {
   const [isConfirmDisbandOpen, setIsConfirmDisbandOpen] = useState(false)
 
   const effectiveClassId = routeClassId || group?.class_id
+
+  // Derived membership and permission states (initialized before any hook or callback references them)
+  const members = useMemo(() => group?.members || [], [group?.members])
+  const isLeader = Boolean(currentUser?.id && group?.leader_id && currentUser.id === group.leader_id)
+  const isTeacher = Boolean(currentUser?.role === 'admin')
+  const isMember = useMemo(() => {
+    if (!currentUser?.id || !members.length) return false
+    return members.some((m) => (m.student_id || m.user?.id) === currentUser.id)
+  }, [currentUser?.id, members])
+  const canManage = Boolean(isLeader || isTeacher)
+  const hasChatAccess = Boolean(isMember || isTeacher)
 
   // 1. Initial Load of Group Details
   useEffect(() => {
@@ -164,12 +186,44 @@ export default function GroupDetailsPage() {
     }
   }
 
-  // Lazy-load assignment history when assignments tab is opened
-  useEffect(() => {
-    if (activeTab === 'assignments' && group?.class_id && group?.id) {
-      loadHistory(group.class_id, group.id)
+  // 2. Load Assignment History for this group (with generation tracking to prevent race conditions)
+  const loadHistory = useCallback(async (cid, gid, forceRefresh = false) => {
+    if (!cid || !gid) return
+    const currentReqId = ++historyReqIdRef.current
+    try {
+      setLoadingHistory(true)
+      setHistoryError(null)
+      const list = await groupsService.getGroupAssignmentHistory(cid, gid, forceRefresh)
+      // Discard older out-of-order responses
+      if (currentReqId !== historyReqIdRef.current) return
+      setAssignmentHistory(list || [])
+      setHistoryLoaded(true)
+    } catch (err) {
+      if (currentReqId !== historyReqIdRef.current) return
+      console.error('[GroupDetailsPage] Error loading assignment history:', err)
+      setHistoryError(err.message || 'Failed to load group assignment records.')
+      setHistoryLoaded(false)
+    } finally {
+      if (currentReqId === historyReqIdRef.current) {
+        setLoadingHistory(false)
+      }
     }
-  }, [activeTab, group?.class_id, group?.id])
+  }, [])
+
+  // Immediate load: Fetch group assignments as soon as class & group IDs are known (do NOT wait for tab click!)
+  useEffect(() => {
+    if (effectiveClassId && groupId) {
+      loadHistory(effectiveClassId, groupId)
+    }
+  }, [effectiveClassId, groupId, loadHistory])
+
+  // Reset assignment state when navigating to a different group
+  useEffect(() => {
+    setAssignmentHistory([])
+    setLoadingHistory(true)
+    setHistoryLoaded(false)
+    setHistoryError(null)
+  }, [groupId])
 
   // Lazy-load chat messages when chat tab is opened
   useEffect(() => {
@@ -177,20 +231,6 @@ export default function GroupDetailsPage() {
       loadChatMessages(group.id)
     }
   }, [activeTab, group?.id, hasChatAccess])
-
-  // 2. Load Assignment History for this group
-  async function loadHistory(cid, gid) {
-    if (!cid || !gid) return
-    try {
-      setLoadingHistory(true)
-      const list = await groupsService.getGroupAssignmentHistory(cid, gid)
-      setAssignmentHistory(list)
-    } catch (err) {
-      console.error('[GroupDetailsPage] Error loading assignment history:', err)
-    } finally {
-      setLoadingHistory(false)
-    }
-  }
 
   // 3. Load Group Chat Messages
   async function loadChatMessages(gid) {
@@ -219,12 +259,12 @@ export default function GroupDetailsPage() {
     }
   }, [activeTab, chatMessages, scrollToBottom])
 
-  const members = group?.members || []
-  const isLeader = currentUser?.id === group?.leader_id
-  const isTeacher = currentUser?.role === 'admin'
-  const isMember = members.some((m) => (m.student_id || m.user?.id) === currentUser?.id)
-  const canManage = isLeader || isTeacher
-  const hasChatAccess = isMember || isTeacher
+  const membersRef = useRef(members)
+  const currentUserRef = useRef(currentUser)
+  useEffect(() => {
+    membersRef.current = members
+    currentUserRef.current = currentUser
+  }, [members, currentUser])
 
   // 4. Realtime Subscription for Group Chat (active only when chat tab is active)
   useEffect(() => {
@@ -257,7 +297,7 @@ export default function GroupDetailsPage() {
       (payload) => {
         if (!payload?.new) return
         const newRow = payload.new
-        const matchedMember = members.find(
+        const matchedMember = membersRef.current.find(
           (m) => (m.student_id || m.user?.id) === newRow.sender_id
         )
         const incoming = {
@@ -266,7 +306,7 @@ export default function GroupDetailsPage() {
           senderId: newRow.sender_id,
           senderName:
             matchedMember?.user?.name ||
-            (newRow.sender_id === currentUser?.id ? currentUser.name : 'Group Member'),
+            (newRow.sender_id === currentUserRef.current?.id ? currentUserRef.current.name : 'Group Member'),
           senderRole: matchedMember?.user?.role || 'student',
           senderEmail: matchedMember?.user?.email || '',
           senderAvatar: matchedMember?.user?.avatar || null,
@@ -279,14 +319,14 @@ export default function GroupDetailsPage() {
 
     channel.subscribe((status, err) => {
       if (status === 'CHANNEL_ERROR') {
-        console.warn(`[GroupDetailsPage] Realtime error for group ${group.id}:`, err)
+        console.warn(`[GroupDetailsPage] Realtime status for group ${group.id}:`, status, err)
       }
     })
 
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [activeTab, group?.id, hasChatAccess, members, currentUser])
+  }, [activeTab, group?.id, hasChatAccess])
 
   // 5. Send Chat Message
   const handleSendMessage = async (e) => {
@@ -407,19 +447,19 @@ export default function GroupDetailsPage() {
   // Loading Skeleton
   if (loading) {
     return (
-      <div className="space-y-6 max-w-6xl mx-auto p-4 sm:p-6 animate-pulse">
+      <div className="space-y-6 max-w-6xl mx-auto p-4 sm:p-6 page-enter">
         {/* Breadcrumb Skeleton */}
-        <div className="h-5 w-64 bg-slate-200/80 rounded-md" />
+        <div className="h-5 w-64 skeleton-shimmer rounded-md border border-brand-border/40" />
         {/* Header Banner Skeleton */}
-        <div className="h-32 bg-slate-200/80 rounded-2xl border border-brand-line" />
+        <div className="h-32 skeleton-shimmer rounded-2xl border border-brand-border/40 shadow-xs" />
         {/* Quick Stats Grid Skeleton */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-24 bg-slate-200/80 rounded-xl border border-brand-line" />
+            <div key={i} className="h-24 skeleton-shimmer rounded-xl border border-brand-border/40 shadow-xs" />
           ))}
         </div>
         {/* Content Skeleton */}
-        <div className="h-72 bg-slate-200/80 rounded-2xl border border-brand-line" />
+        <div className="h-72 skeleton-shimmer rounded-2xl border border-brand-border/40 shadow-xs" />
       </div>
     )
   }
@@ -466,8 +506,15 @@ export default function GroupDetailsPage() {
     )
   }
 
-  const acknowledgedCount = assignmentHistory.filter((a) => a.isAcknowledged).length
-  const pendingCount = assignmentHistory.length - acknowledgedCount
+  const acknowledgedCount = assignmentHistory.filter((a) => Boolean(a.submission)).length
+  const pendingCount = Math.max(0, assignmentHistory.length - acknowledgedCount)
+  const gradedCount = assignmentHistory.filter(
+    (a) =>
+      a.submission &&
+      (a.submission.status === 'reviewed' ||
+        (a.submission.marks !== null && a.submission.marks !== undefined))
+  ).length
+
   const rolePrefix = currentUser?.role === 'admin' ? '/admin' : '/student'
 
   return (
@@ -664,7 +711,18 @@ export default function GroupDetailsPage() {
           }`}
         >
           <FileText className="w-4 h-4" />
-          <span>Group Assignments ({assignmentHistory.length})</span>
+          <span>
+            Group Assignments{' '}
+            {loadingHistory && !historyLoaded ? (
+              <span
+                className={`inline-block w-2 h-2 rounded-full align-middle ml-1 ${
+                  activeTab === 'assignments' ? 'bg-white' : 'bg-purple-500'
+                } animate-ping`}
+              />
+            ) : (
+              `(${assignmentHistory.length})`
+            )}
+          </span>
         </button>
 
         <button
@@ -714,7 +772,11 @@ export default function GroupDetailsPage() {
                 Eligible Tasks
               </span>
               <p className="text-2xl sm:text-3xl font-black text-brand-primary mt-1">
-                {assignmentHistory.length}
+                {loadingHistory && !historyLoaded ? (
+                  <span className="inline-block w-8 h-7 bg-purple-200/60 rounded animate-pulse" />
+                ) : (
+                  assignmentHistory.length
+                )}
               </p>
               <span className="text-[11px] text-purple-600/80 mt-1 block">Coursework deliverables</span>
             </Card>
@@ -724,9 +786,15 @@ export default function GroupDetailsPage() {
                 Submitted
               </span>
               <p className="text-2xl sm:text-3xl font-black text-emerald-800 mt-1">
-                {acknowledgedCount}
+                {loadingHistory && !historyLoaded ? (
+                  <span className="inline-block w-8 h-7 bg-emerald-200/60 rounded animate-pulse" />
+                ) : (
+                  acknowledgedCount
+                )}
               </p>
-              <span className="text-[11px] text-emerald-600/80 mt-1 block">Acknowledged by leader</span>
+              <span className="text-[11px] text-emerald-600/80 mt-1 block">
+                {gradedCount > 0 ? `${gradedCount} reviewed` : 'Acknowledged by leader'}
+              </span>
             </Card>
 
             <Card padding="p-5" className="border-amber-100 bg-amber-50/40">
@@ -734,7 +802,11 @@ export default function GroupDetailsPage() {
                 Pending
               </span>
               <p className="text-2xl sm:text-3xl font-black text-amber-800 mt-1">
-                {pendingCount}
+                {loadingHistory && !historyLoaded ? (
+                  <span className="inline-block w-8 h-7 bg-amber-200/60 rounded animate-pulse" />
+                ) : (
+                  pendingCount
+                )}
               </p>
               <span className="text-[11px] text-amber-600/80 mt-1 block">Awaiting submission</span>
             </Card>
@@ -899,15 +971,35 @@ export default function GroupDetailsPage() {
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold uppercase tracking-wider text-brand-muted flex items-center gap-2">
               <FileText className="w-4 h-4 text-brand-primary" />
-              <span>Eligible Group Deliverables ({assignmentHistory.length})</span>
+              <span>
+                Eligible Group Deliverables{' '}
+                {loadingHistory && !historyLoaded ? (
+                  <span className="text-xs font-normal text-slate-400 lowercase">(loading...)</span>
+                ) : (
+                  `(${assignmentHistory.length})`
+                )}
+              </span>
             </h3>
             <span className="text-xs text-slate-400">Filtered by course & selective allocation</span>
           </div>
 
-          {loadingHistory ? (
-            <div className="p-12 text-center text-xs text-brand-muted animate-pulse">
-              Loading group assignments...
-            </div>
+          {loadingHistory && !historyLoaded ? (
+            <GroupAssignmentSkeleton />
+          ) : historyError ? (
+            <Card padding="p-8" className="text-center space-y-3 border-rose-200 bg-rose-50/40">
+              <AlertCircle className="w-8 h-8 text-rose-500 mx-auto" />
+              <h4 className="text-sm font-bold text-rose-900">Failed to Load Group Assignments</h4>
+              <p className="text-xs text-rose-700 max-w-sm mx-auto">{historyError}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => loadHistory(effectiveClassId, groupId, true)}
+                className="text-xs font-semibold mt-2 cursor-pointer mx-auto"
+                icon={RefreshCw}
+              >
+                Retry Loading
+              </Button>
+            </Card>
           ) : assignmentHistory.length === 0 ? (
             <Card padding="p-12" className="text-center space-y-2 border-brand-line">
               <FileText className="w-10 h-10 text-slate-300 mx-auto" />
@@ -972,13 +1064,21 @@ export default function GroupDetailsPage() {
                           </Badge>
                         )}
 
-                        {canManage ? (
+                        {isTeacher ? (
                           <Button
                             variant="primary"
                             size="sm"
                             onClick={() => {
                               navigate(
-                                `/admin/assignments/${item.id}?groupId=${group.id}&classId=${group.class_id}`
+                                `/admin/assignments/${item.id}?groupId=${group.id}&classId=${group.class_id}`,
+                                {
+                                  state: {
+                                    from: 'group',
+                                    classId: group.class_id,
+                                    groupId: group.id,
+                                    tab: 'assignments',
+                                  },
+                                }
                               )
                             }}
                             className="font-semibold text-xs shadow-purple-glow cursor-pointer"
@@ -986,24 +1086,38 @@ export default function GroupDetailsPage() {
                           >
                             Open Work
                           </Button>
-                        ) : item.submission?.submission_link ? (
-                          <a
-                            href={item.submission.submission_link}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-xs font-bold text-brand-primary hover:underline bg-brand-light px-2.5 py-1 rounded-lg cursor-pointer"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                            <span>View Deliverable</span>
-                          </a>
                         ) : (
-                          <Link
-                            to={`/student/assignments/${item.id}`}
-                            className="inline-flex items-center gap-1 text-xs font-bold text-brand-primary hover:underline bg-brand-light px-2.5 py-1 rounded-lg cursor-pointer"
-                          >
-                            <span>Open Task</span>
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </Link>
+                          <div className="flex items-center gap-2">
+                            {item.submission?.submission_link && (
+                              <a
+                                href={sanitizeUrl(item.submission.submission_link)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs font-bold text-brand-primary hover:underline bg-brand-light px-2.5 py-1 rounded-lg cursor-pointer"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                                <span>Deliverable</span>
+                              </a>
+                            )}
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={() => {
+                                navigate(`/student/assignments/${item.id}`, {
+                                  state: {
+                                    from: 'group',
+                                    classId: group.class_id,
+                                    groupId: group.id,
+                                    tab: 'assignments',
+                                  },
+                                })
+                              }}
+                              className="font-semibold text-xs shadow-purple-glow cursor-pointer"
+                              icon={FileText}
+                            >
+                              Open Work
+                            </Button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1320,6 +1434,37 @@ export default function GroupDetailsPage() {
           </div>
         </div>
       </Modal>
+    </div>
+  )
+}
+
+function GroupAssignmentSkeleton() {
+  return (
+    <div className="space-y-3" role="status" aria-label="Loading group assignments">
+      {[1, 2, 3].map((n) => (
+        <Card
+          key={n}
+          padding="p-5"
+          className="border-brand-line/80 bg-white animate-pulse"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="min-w-0 flex-1 space-y-2.5">
+              <div className="flex items-center gap-2">
+                <div className="h-5 w-48 bg-slate-200 rounded-md" />
+                <div className="h-4 w-16 bg-purple-100 rounded-full" />
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3.5 h-3.5 bg-slate-200 rounded-full" />
+                <div className="h-3 w-40 bg-slate-100 rounded" />
+              </div>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="h-7 w-24 bg-slate-100 rounded-full" />
+              <div className="h-8 w-24 bg-purple-100 rounded-lg" />
+            </div>
+          </div>
+        </Card>
+      ))}
     </div>
   )
 }

@@ -21,7 +21,8 @@ import {
   Lock,
   MessageCircle,
   ChevronRight,
-  Info
+  Info,
+  RefreshCw
 } from 'lucide-react'
 import Modal from '../common/Modal'
 import Button from '../common/Button'
@@ -35,7 +36,8 @@ import {
   formatDisplayDate,
   formatMessageTime,
   formatMessageDateSeparator,
-  isDifferentDay
+  isDifferentDay,
+  sanitizeUrl
 } from '../../utils/calculations'
 
 export default function GroupDetailsModal({
@@ -53,6 +55,9 @@ export default function GroupDetailsModal({
   const [activeTab, setActiveTab] = useState('overview') // 'overview', 'members', 'assignments', 'chat'
   const [assignmentHistory, setAssignmentHistory] = useState([])
   const [loadingHistory, setLoadingHistory] = useState(false)
+  const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [historyError, setHistoryError] = useState(null)
+  const historyReqIdRef = useRef(0)
   const [actionLoading, setActionLoading] = useState(false)
   const [modalFeedback, setModalFeedback] = useState({ type: '', text: '' })
 
@@ -77,6 +82,11 @@ export default function GroupDetailsModal({
   const canJoin = !isUserInAnyGroup && !isMember && currentUser?.role === 'student'
   const canManage = isLeader || isTeacher
   const hasChatAccess = isMember || isTeacher
+
+  const membersRef = useRef(members)
+  membersRef.current = members
+  const currentUserRef = useRef(currentUser)
+  currentUserRef.current = currentUser
 
   function getMessageSenderMeta(msg) {
     const senderRole = msg.senderRole || 'student'
@@ -154,12 +164,45 @@ export default function GroupDetailsModal({
     }
   }, [isOpen, group])
 
-  // Lazy-load assignment history only when assignments tab is opened
-  useEffect(() => {
-    if (isOpen && activeTab === 'assignments' && currentGroup?.id && currentGroup?.class_id) {
-      loadHistory()
+  // 1. Load Assignment History for this group (with generation tracking to prevent race conditions)
+  const loadHistory = useCallback(async (forceRefresh = false) => {
+    if (!currentGroup?.class_id || !currentGroup?.id) return
+    const currentReqId = ++historyReqIdRef.current
+    try {
+      setLoadingHistory(true)
+      setHistoryError(null)
+      const list = await groupsService.getGroupAssignmentHistory(
+        currentGroup.class_id,
+        currentGroup.id,
+        forceRefresh
+      )
+      if (currentReqId !== historyReqIdRef.current) return
+      setAssignmentHistory(list || [])
+      setHistoryLoaded(true)
+    } catch (err) {
+      if (currentReqId !== historyReqIdRef.current) return
+      console.error('[GroupDetailsModal] Error loading assignment history:', err)
+      setHistoryError(err.message || 'Failed to load group assignment records.')
+      setHistoryLoaded(false)
+    } finally {
+      if (currentReqId === historyReqIdRef.current) {
+        setLoadingHistory(false)
+      }
     }
-  }, [isOpen, activeTab, currentGroup?.id, currentGroup?.class_id])
+  }, [currentGroup?.class_id, currentGroup?.id])
+
+  // Load assignment history immediately when modal is opened (do NOT wait for user to click tab!)
+  useEffect(() => {
+    if (isOpen && currentGroup?.id && currentGroup?.class_id) {
+      loadHistory()
+    } else if (!isOpen) {
+      // Clean reset on close
+      setAssignmentHistory([])
+      setHistoryLoaded(false)
+      setHistoryError(null)
+      setLoadingHistory(false)
+    }
+  }, [isOpen, currentGroup?.id, currentGroup?.class_id, loadHistory])
 
   // Lazy-load chat messages only when chat tab is opened
   useEffect(() => {
@@ -180,20 +223,6 @@ export default function GroupDetailsModal({
       scrollToBottom()
     }
   }, [activeTab, chatMessages, scrollToBottom])
-
-  // 1. Load Assignment History for this group
-  async function loadHistory() {
-    if (!currentGroup?.class_id || !currentGroup?.id) return
-    try {
-      setLoadingHistory(true)
-      const list = await groupsService.getGroupAssignmentHistory(currentGroup.class_id, currentGroup.id)
-      setAssignmentHistory(list)
-    } catch (err) {
-      console.error('[GroupDetailsModal] Error loading assignment history:', err)
-    } finally {
-      setLoadingHistory(false)
-    }
-  }
 
   // 2. Load Group Discussion Chat Messages
   async function loadChatMessages(groupId) {
@@ -247,15 +276,17 @@ export default function GroupDetailsModal({
       (payload) => {
         if (!payload?.new) return
         const newRow = payload.new
-        // Resolve sender from current group members
-        const matchedMember = members.find(
+        // Resolve sender from current group members ref
+        const currentMembers = membersRef.current || []
+        const currentSessionUser = currentUserRef.current
+        const matchedMember = currentMembers.find(
           (m) => (m.student_id || m.user?.id) === newRow.sender_id
         )
         const incoming = {
           id: newRow.id,
           groupId: newRow.group_id,
           senderId: newRow.sender_id,
-          senderName: matchedMember?.user?.name || (newRow.sender_id === currentUser?.id ? currentUser.name : 'Group Member'),
+          senderName: matchedMember?.user?.name || (newRow.sender_id === currentSessionUser?.id ? currentSessionUser.name : 'Group Member'),
           senderRole: matchedMember?.user?.role || 'student',
           senderEmail: matchedMember?.user?.email || '',
           senderAvatar: matchedMember?.user?.avatar || null,
@@ -275,7 +306,7 @@ export default function GroupDetailsModal({
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [isOpen, activeTab, currentGroup?.id, hasChatAccess, members, currentUser])
+  }, [isOpen, activeTab, currentGroup?.id, hasChatAccess])
 
   if (!currentGroup) return null
 
@@ -400,8 +431,14 @@ export default function GroupDetailsModal({
     }
   }
 
-  const acknowledgedCount = assignmentHistory.filter((a) => a.isAcknowledged).length
-  const pendingCount = assignmentHistory.length - acknowledgedCount
+  const acknowledgedCount = assignmentHistory.filter((a) => Boolean(a.submission)).length
+  const pendingCount = Math.max(0, assignmentHistory.length - acknowledgedCount)
+  const gradedCount = assignmentHistory.filter(
+    (a) =>
+      a.submission &&
+      (a.submission.status === 'reviewed' ||
+        (a.submission.marks !== null && a.submission.marks !== undefined))
+  ).length
 
   return (
     <>
@@ -410,7 +447,7 @@ export default function GroupDetailsModal({
         onClose={onClose}
         title={
           <div className="flex items-center gap-3 min-w-0 pr-6">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-primary to-purple-500 text-white flex items-center justify-center font-bold shrink-0 shadow-sm">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-primary to-purple-500 text-white flex items-center justify-center font-bold shrink-0 shadow-purple-glow">
               <Users className="w-5 h-5" />
             </div>
             <div className="min-w-0 flex-1">
@@ -586,7 +623,18 @@ export default function GroupDetailsModal({
               }`}
             >
               <FileText className="w-3.5 h-3.5" />
-              <span>Group Assignments ({assignmentHistory.length})</span>
+              <span>
+                Group Assignments{' '}
+                {loadingHistory && !historyLoaded ? (
+                  <span
+                    className={`inline-block w-2 h-2 rounded-full align-middle ml-1 ${
+                      activeTab === 'assignments' ? 'bg-white' : 'bg-purple-500'
+                    } animate-ping`}
+                  />
+                ) : (
+                  `(${assignmentHistory.length})`
+                )}
+              </span>
             </button>
 
             <button
@@ -627,19 +675,40 @@ export default function GroupDetailsModal({
                   <span className="text-[11px] text-brand-primary uppercase font-bold tracking-wider block">
                     Group Tasks
                   </span>
-                  <p className="text-xl font-black text-brand-primary mt-1">{assignmentHistory.length}</p>
+                  <p className="text-xl font-black text-brand-primary mt-1">
+                    {loadingHistory && !historyLoaded ? (
+                      <span className="inline-block w-6 h-5 bg-purple-200/60 rounded animate-pulse" />
+                    ) : (
+                      assignmentHistory.length
+                    )}
+                  </p>
                 </div>
                 <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-100">
                   <span className="text-[11px] text-emerald-700 uppercase font-bold tracking-wider block">
                     Submitted
                   </span>
-                  <p className="text-xl font-black text-emerald-800 mt-1">{acknowledgedCount}</p>
+                  <p className="text-xl font-black text-emerald-800 mt-1">
+                    {loadingHistory && !historyLoaded ? (
+                      <span className="inline-block w-6 h-5 bg-emerald-200/60 rounded animate-pulse" />
+                    ) : (
+                      acknowledgedCount
+                    )}
+                  </p>
+                  {gradedCount > 0 && !loadingHistory && (
+                    <span className="text-[10px] text-emerald-600 block mt-0.5">{gradedCount} reviewed</span>
+                  )}
                 </div>
                 <div className="p-3.5 rounded-xl bg-amber-50/60 border border-amber-100">
                   <span className="text-[11px] text-amber-700 uppercase font-bold tracking-wider block">
                     Pending
                   </span>
-                  <p className="text-xl font-black text-amber-800 mt-1">{pendingCount}</p>
+                  <p className="text-xl font-black text-amber-800 mt-1">
+                    {loadingHistory && !historyLoaded ? (
+                      <span className="inline-block w-6 h-5 bg-amber-200/60 rounded animate-pulse" />
+                    ) : (
+                      pendingCount
+                    )}
+                  </p>
                 </div>
               </div>
 
@@ -797,14 +866,52 @@ export default function GroupDetailsModal({
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-brand-muted flex items-center gap-1.5">
                   <FileText className="w-3.5 h-3.5 text-brand-primary" />
-                  <span>Eligible Group Assignments ({assignmentHistory.length})</span>
+                  <span>
+                    Eligible Group Assignments{' '}
+                    {loadingHistory && !historyLoaded ? (
+                      <span className="text-xs font-normal text-slate-400 lowercase">(loading...)</span>
+                    ) : (
+                      `(${assignmentHistory.length})`
+                    )}
+                  </span>
                 </h4>
                 <span className="text-[11px] text-slate-400">Class & allocation verified</span>
               </div>
 
-              {loadingHistory ? (
-                <div className="p-8 text-center text-xs text-brand-muted animate-pulse">
-                  Loading group assignment records...
+              {loadingHistory && !historyLoaded ? (
+                <div className="space-y-2.5" role="status" aria-label="Loading group assignments">
+                  {[1, 2, 3].map((n) => (
+                    <div
+                      key={n}
+                      className="p-3.5 rounded-xl border border-brand-line/80 bg-white animate-pulse flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
+                    >
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <div className="h-4 w-36 bg-slate-200 rounded" />
+                          <div className="h-3 w-12 bg-purple-100 rounded-full" />
+                        </div>
+                        <div className="h-2.5 w-32 bg-slate-100 rounded" />
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="h-6 w-20 bg-slate-100 rounded-full" />
+                        <div className="h-7 w-20 bg-purple-100 rounded-lg" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : historyError ? (
+                <div className="p-6 rounded-xl border border-rose-200 bg-rose-50/40 text-center space-y-2">
+                  <AlertCircle className="w-6 h-6 text-rose-500 mx-auto" />
+                  <p className="text-xs font-bold text-rose-900">Failed to Load Group Assignments</p>
+                  <p className="text-[11px] text-rose-700 max-w-xs mx-auto">{historyError}</p>
+                  <button
+                    type="button"
+                    onClick={() => loadHistory(true)}
+                    className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-white border border-rose-200 text-rose-800 text-xs font-semibold hover:bg-rose-50 cursor-pointer transition-colors"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Retry Loading</span>
+                  </button>
                 </div>
               ) : assignmentHistory.length === 0 ? (
                 <div className="p-8 rounded-xl bg-slate-50 border border-brand-line text-center space-y-1">
@@ -866,14 +973,22 @@ export default function GroupDetailsModal({
                           )}
 
                           {/* For Admin/Professor: Open Work in SubmissionTracking */}
-                          {canManage ? (
+                          {isTeacher ? (
                             <Button
                               variant="primary"
                               size="sm"
                               onClick={() => {
                                 if (onClose) onClose()
                                 navigate(
-                                  `/admin/assignments/${item.id}?groupId=${currentGroup.id}&classId=${currentGroup.class_id}`
+                                  `/admin/assignments/${item.id}?groupId=${currentGroup.id}&classId=${currentGroup.class_id}`,
+                                  {
+                                    state: {
+                                      from: 'group',
+                                      classId: currentGroup.class_id,
+                                      groupId: currentGroup.id,
+                                      tab: 'assignments',
+                                    },
+                                  }
                                 )
                               }}
                               className="font-semibold text-xs shadow-purple-glow cursor-pointer"
@@ -881,24 +996,39 @@ export default function GroupDetailsModal({
                             >
                               Open Work
                             </Button>
-                          ) : item.submission?.submission_link ? (
-                            <a
-                              href={item.submission.submission_link}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-primary hover:underline bg-brand-light px-2.5 py-1 rounded cursor-pointer"
-                            >
-                              <ExternalLink className="w-3 h-3" />
-                              <span>Deliverable</span>
-                            </a>
                           ) : (
-                            <Link
-                              to={`/student/assignments/${item.id}`}
-                              className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-primary hover:underline bg-brand-light px-2.5 py-1 rounded cursor-pointer"
-                            >
-                              <span>Open Assignment</span>
-                              <ChevronRight className="w-3 h-3" />
-                            </Link>
+                            <div className="flex items-center gap-2">
+                              {item.submission?.submission_link && (
+                                <a
+                                  href={sanitizeUrl(item.submission.submission_link)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-primary hover:underline bg-brand-light px-2.5 py-1 rounded cursor-pointer"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  <span>Deliverable</span>
+                                </a>
+                              )}
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={() => {
+                                  if (onClose) onClose()
+                                  navigate(`/student/assignments/${item.id}`, {
+                                    state: {
+                                      from: 'group',
+                                      classId: currentGroup.class_id,
+                                      groupId: currentGroup.id,
+                                      tab: 'assignments',
+                                    },
+                                  })
+                                }}
+                                className="font-semibold text-xs shadow-purple-glow cursor-pointer"
+                                icon={FileText}
+                              >
+                                Open Work
+                              </Button>
+                            </div>
                           )}
                         </div>
                       </div>

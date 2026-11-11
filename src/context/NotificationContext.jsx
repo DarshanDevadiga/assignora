@@ -117,29 +117,25 @@ export function NotificationProvider({ children }) {
   useEffect(() => {
     if (!user?.id) {
       if (activeChannelRef.current) {
-        supabase.removeChannel(activeChannelRef.current)
+        try {
+          supabase.removeChannel(activeChannelRef.current)
+        } catch (e) {}
         activeChannelRef.current = null
         connectedUserRef.current = null
       }
       return
     }
 
-    let isSubscribed = true
-
-    // Remove any stale channel first to prevent duplicate connections
-    if (activeChannelRef.current) {
-      supabase.removeChannel(activeChannelRef.current)
-      activeChannelRef.current = null
+    // If channel is already established for this exact user, do not tear down and reconnect
+    if (connectedUserRef.current === user.id && activeChannelRef.current) {
+      return
     }
 
-    const existingChannels = supabase.getChannels().filter(
-      (c) => c.topic === 'realtime:assignora-realtime'
-    )
-    existingChannels.forEach((c) => supabase.removeChannel(c))
+    connectedUserRef.current = user.id
+    let isSubscribed = true
 
-    const channel = supabase.channel('assignora-realtime', {
-      config: { broadcast: { self: true } },
-    })
+    // Retrieve or initialize the single shared global channel
+    const channel = messagesService.getChannel()
     activeChannelRef.current = channel
 
     const handleBroadcast = ({ event, payload }) => {
@@ -158,7 +154,7 @@ export function NotificationProvider({ children }) {
             return { ...prev, [classId]: current + 1 }
           })
 
-          // Also prepend a notification for new class message
+          // Prepend a notification for new class message
           setNotifications((prev) => [
             {
               id: `notif-${Date.now()}-${Math.random()}`,
@@ -201,28 +197,37 @@ export function NotificationProvider({ children }) {
       }
     }
 
+    // 1. Subscribe to in-memory bus for instant 0ms intra-tab responsiveness
+    const unsubBus = messagesService.subscribe(handleBroadcast)
+
+    // 2. Attach broadcast handler to channel for cross-tab and remote sync
     channel.on('broadcast', { event: '*' }, handleBroadcast)
 
-    channel.subscribe((status, error) => {
-      if (!isSubscribed) return
-      if (status === 'SUBSCRIBED') {
-        if (connectedUserRef.current !== user.id) {
-          connectedUserRef.current = user.id
-          console.log('[NotificationContext] Realtime connected for user:', user.id)
+    // 3. Ensure channel subscription without duplicate socket initialization
+    if (channel.state !== 'joined' && channel.state !== 'joining') {
+      channel.subscribe((status, error) => {
+        if (!isSubscribed) return
+        if (status === 'SUBSCRIBED') {
+          // Connected cleanly
+        } else if (status === 'CHANNEL_ERROR') {
+          console.warn('[NotificationContext] Realtime connection note:', error?.message || status)
+        } else if (status === 'TIMED_OUT') {
+          console.warn('[NotificationContext] Realtime channel timed out')
         }
-      } else if (status === 'CHANNEL_ERROR') {
-        console.warn('[NotificationContext] Realtime channel error:', error)
-      } else if (status === 'TIMED_OUT') {
-        console.warn('[NotificationContext] Realtime channel timed out')
-      }
-    })
+      })
+    }
 
     return () => {
       isSubscribed = false
-      if (activeChannelRef.current === channel) {
-        supabase.removeChannel(channel)
-        activeChannelRef.current = null
-        connectedUserRef.current = null
+      unsubBus()
+      // Only remove channel if the user has actually logged out or changed
+      if (connectedUserRef.current !== userIdRef.current) {
+        if (activeChannelRef.current) {
+          try {
+            supabase.removeChannel(activeChannelRef.current)
+          } catch (e) {}
+          activeChannelRef.current = null
+        }
       }
     }
   }, [user?.id])

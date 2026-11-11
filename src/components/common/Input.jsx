@@ -29,7 +29,7 @@ export function Input({
         <input
           id={inputId}
           required={required}
-          className={`block w-full rounded-input border bg-white px-3 py-2 text-sm text-brand-heading placeholder:text-slate-400 transition-colors focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20 ${
+          className={`block w-full rounded-input border bg-white px-3 py-2 text-sm text-brand-heading placeholder:text-slate-400 transition-all duration-150 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:shadow-glow-sm ${
             Icon ? 'pl-9' : ''
           } ${rightElement ? 'pr-10' : ''} ${error ? 'border-brand-danger focus:ring-brand-danger/20' : 'border-brand-line'} ${className}`}
           {...props}
@@ -69,7 +69,7 @@ export function Select({
       <select
         id={selectId}
         required={required}
-        className={`block w-full rounded-input border bg-white px-3 py-2 text-sm text-brand-heading transition-colors focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20 cursor-pointer ${
+        className={`block w-full rounded-input border bg-white px-3 py-2 text-sm text-brand-heading transition-all duration-150 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:shadow-glow-sm cursor-pointer ${
           error ? 'border-brand-danger focus:ring-brand-danger/20' : 'border-brand-line'
         } ${className}`}
         {...props}
@@ -110,7 +110,7 @@ export function Textarea({
         id={textareaId}
         required={required}
         rows={rows}
-        className={`block w-full rounded-input border bg-white px-3 py-2 text-sm text-brand-heading placeholder:text-slate-400 transition-colors focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20 ${
+        className={`block w-full rounded-input border bg-white px-3 py-2 text-sm text-brand-heading placeholder:text-slate-400 transition-all duration-150 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:shadow-glow-sm ${
           error ? 'border-brand-danger focus:ring-brand-danger/20' : 'border-brand-line'
         } ${className}`}
         {...props}

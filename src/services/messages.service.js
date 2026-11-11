@@ -136,6 +136,24 @@ export const messagesService = {
   },
 
   /**
+   * Clean up and reset global realtime channel (e.g. on user logout)
+   */
+  cleanupRealtime() {
+    if (globalChannel) {
+      try {
+        supabase.removeChannel(globalChannel)
+      } catch (e) {}
+      globalChannel = null
+    }
+    const existing = supabase.getChannels().filter((c) => c.topic === `realtime:${REALTIME_CHANNEL}`)
+    existing.forEach((c) => {
+      try {
+        supabase.removeChannel(c)
+      } catch (e) {}
+    })
+  },
+
+  /**
    * Broadcast an event over the realtime channel and notify bus listeners
    */
   async broadcast(event, payload) {

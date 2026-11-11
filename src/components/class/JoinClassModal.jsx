@@ -83,12 +83,22 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
 
   // Step 2: Confirm and Enroll
   const handleConfirmEnrollment = async () => {
-    if (!classPreview || !user?.id) return
+    if (!classPreview || !user?.id) {
+      setError('You must be signed in as a student to join a class.')
+      return
+    }
 
     try {
       setEnrolling(true)
       setError(null)
-      await classesService.enrollStudent(classPreview.id, user.id, code)
+      const membership = await classesService.enrollStudent(
+        classPreview.id,
+        user.id,
+        code || classPreview.class_code
+      )
+      if (!membership || (!membership.id && !membership.class_id)) {
+        throw new Error('Enrollment could not be confirmed. Please try again.')
+      }
       setSuccess(true)
 
       if (onEnrolled) {
@@ -201,16 +211,18 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
             <div className="rounded-xl p-3.5 bg-slate-50 border border-brand-line flex items-center justify-between text-xs">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-full bg-brand-light text-brand-primary flex items-center justify-center font-bold">
-                  {classPreview.users?.name?.charAt(0) || 'P'}
+                  {(classPreview.users?.name || classPreview.teacher?.name || 'P').charAt(0)}
                 </div>
                 <div>
                   <span className="text-[11px] text-brand-muted block">Instructor</span>
-                  <strong className="text-brand-heading">{classPreview.users?.name || 'Faculty Member'}</strong>
+                  <strong className="text-brand-heading">
+                    {classPreview.users?.name || classPreview.teacher?.name || 'Faculty Member'}
+                  </strong>
                 </div>
               </div>
               <div className="flex items-center gap-1.5 text-brand-muted">
                 <Users className="w-4 h-4" />
-                <span>{classPreview.class_members?.length || 0} students enrolled</span>
+                <span>{classPreview.student_count ?? classPreview.class_members?.length ?? 0} students enrolled</span>
               </div>
             </div>
 

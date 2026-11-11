@@ -17,24 +17,24 @@ export default function ProgressBar({
   }
 
   const colorClasses = {
-    purple: 'bg-brand-primary',
-    gradient: 'bg-gradient-to-r from-brand-primary to-brand-secondary',
-    green: 'bg-emerald-500',
-    amber: 'bg-amber-500',
+    purple: 'bg-brand-primary shadow-glow-sm',
+    gradient: 'bg-gradient-to-r from-brand-primary via-brand-secondary to-indigo-500 shadow-glow-sm',
+    green: 'bg-emerald-500 shadow-glow-green',
+    amber: 'bg-amber-500 shadow-glow-amber',
     red: 'bg-rose-500',
   }
 
   return (
     <div className={`w-full ${className}`}>
-      <div className={`w-full bg-slate-100 rounded-full overflow-hidden ${sizeClasses[size]}`}>
+      <div className={`w-full bg-slate-100/90 rounded-full overflow-hidden ${sizeClasses[size]}`}>
         <div
-          className={`h-full transition-all duration-500 ease-out rounded-full ${colorClasses[color] || colorClasses.purple}`}
+          className={`h-full transition-all duration-700 ease-out rounded-full ${colorClasses[color] || colorClasses.purple}`}
           style={{ width: `${percentage}%` }}
         />
       </div>
       {showLabel && (
-        <div className="flex justify-between items-center mt-1 text-xs text-brand-muted font-medium">
-          <span>{percentage}% complete</span>
+        <div className="flex justify-between items-center mt-1.5 text-xs text-brand-muted font-medium">
+          <span className="text-brand-heading font-semibold">{percentage}% complete</span>
           <span>{value} / {max}</span>
         </div>
       )}

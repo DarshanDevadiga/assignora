@@ -12,20 +12,20 @@ export default function Button({
   onClick,
   ...props
 }) {
-  const baseClasses = 'inline-flex items-center justify-center font-medium transition-all duration-150 rounded-btn focus:outline-none focus:ring-2 focus:ring-offset-1 select-none disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer'
+  const baseClasses = 'inline-flex items-center justify-center font-medium transition-all duration-200 rounded-btn focus:outline-none focus:ring-2 focus:ring-offset-1 select-none disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer active:scale-[0.98]'
 
   const sizeClasses = {
     sm: 'text-xs px-2.5 py-1.5 gap-1.5',
-    md: 'text-sm px-4 py-2 gap-2',
-    lg: 'text-base px-5 py-2.5 gap-2.5',
+    md: 'text-sm px-4 py-2 gap-2 shadow-xs',
+    lg: 'text-base px-5 py-2.5 gap-2.5 shadow-xs',
   }
 
   const variantClasses = {
-    primary: 'bg-brand-primary hover:bg-brand-hover text-white shadow-sm focus:ring-brand-primary/50',
-    secondary: 'bg-brand-secondary hover:bg-brand-hover text-white focus:ring-brand-secondary/50',
-    light: 'bg-brand-light text-brand-primary hover:bg-brand-border/60 focus:ring-brand-primary/40',
-    outline: 'border border-brand-line bg-white text-brand-body hover:bg-brand-bg hover:border-brand-border focus:ring-brand-primary/30',
-    danger: 'bg-brand-danger hover:bg-red-600 text-white focus:ring-red-400',
+    primary: 'bg-brand-primary hover:bg-brand-hover text-white shadow-purple-glow hover:shadow-glow-md focus:ring-brand-primary/50 border border-brand-primary/20',
+    secondary: 'bg-brand-secondary hover:bg-brand-hover text-white shadow-sm hover:shadow-purple-glow focus:ring-brand-secondary/50',
+    light: 'bg-brand-light text-brand-primary hover:bg-brand-border/70 border border-brand-border/50 focus:ring-brand-primary/40',
+    outline: 'border border-brand-line bg-white text-brand-body hover:bg-brand-bg hover:border-brand-border/80 hover:text-brand-heading focus:ring-brand-primary/30 shadow-xs',
+    danger: 'bg-brand-danger hover:bg-red-600 text-white shadow-sm focus:ring-red-400',
     ghost: 'text-brand-muted hover:text-brand-heading hover:bg-brand-secondaryBg focus:ring-brand-primary/20',
   }
 

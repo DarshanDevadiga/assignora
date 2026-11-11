@@ -48,7 +48,9 @@ export default function DashboardLayout({ user, role = 'admin', onLogout }) {
         {/* Page Content */}
         <main className="flex-1 px-4 sm:px-8 py-6 pb-20 lg:pb-8 max-w-7xl w-full mx-auto">
           <ErrorBoundary>
-            <Outlet />
+            <div className="page-enter">
+              <Outlet />
+            </div>
           </ErrorBoundary>
         </main>
 

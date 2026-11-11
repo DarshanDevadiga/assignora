@@ -105,12 +105,12 @@ export default function NotificationsDrawer({
     <div className="fixed inset-0 z-50 overflow-hidden">
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity"
+        className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity duration-200 animate-fade-in"
         onClick={onClose}
       />
 
       <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
-        <div className="w-screen max-w-sm sm:max-w-md bg-white border-l border-brand-line shadow-2xl flex flex-col">
+        <div className="w-screen max-w-sm sm:max-w-md bg-white border-l border-brand-line shadow-2xl flex flex-col transform transition-transform duration-200 animate-slide-up">
           
           {/* Header */}
           <div className="p-5 border-b border-brand-line/60 flex items-center justify-between">
@@ -177,8 +177,10 @@ export default function NotificationsDrawer({
               <div
                 key={notif.id}
                 onClick={() => handleNotificationClick(notif)}
-                className={`p-4 rounded-xl transition-all cursor-pointer flex items-start gap-3.5 ${
-                  notif.is_read ? 'hover:bg-slate-50' : 'bg-brand-light/30 hover:bg-brand-light/50'
+                className={`p-4 rounded-xl transition-all duration-150 cursor-pointer flex items-start gap-3.5 ${
+                  notif.is_read
+                    ? 'hover:bg-slate-50'
+                    : 'bg-brand-light/40 hover:bg-brand-light/60 border-l-3 border-l-brand-primary'
                 }`}
               >
                 <div className="w-8 h-8 rounded-lg bg-white border border-brand-line/70 flex items-center justify-center shrink-0 shadow-xs mt-0.5">
@@ -191,7 +193,7 @@ export default function NotificationsDrawer({
                       {notif.title}
                     </h4>
                     {!notif.is_read && (
-                      <span className="w-2 h-2 rounded-full bg-brand-primary shrink-0 mt-1" />
+                      <span className="w-2 h-2 rounded-full bg-brand-primary shrink-0 mt-1 shadow-glow-sm animate-subtle-pulse" />
                     )}
                   </div>
 

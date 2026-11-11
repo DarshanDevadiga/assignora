@@ -25,19 +25,20 @@ const SettingsPage = lazy(() => import('../pages/shared/SettingsPage'))
 const ProfilePage = lazy(() => import('../pages/shared/ProfilePage'))
 const JoinClassPage = lazy(() => import('../pages/shared/JoinClassPage'))
 const LandingPage = lazy(() => import('../pages/LandingPage'))
+const AuthCallback = lazy(() => import('../pages/AuthCallback'))
 const NotFound = lazy(() => import('../pages/shared/NotFound'))
 
-// Lightweight skeleton fallback while chunk loads
+// Lightweight shimmer skeleton fallback while chunk loads
 function PageSkeleton() {
   return (
-    <div className="space-y-6 animate-pulse p-2">
-      <div className="h-24 rounded-2xl bg-slate-100/80 border border-brand-line/50" />
+    <div className="space-y-6 p-4 max-w-7xl mx-auto page-enter">
+      <div className="h-28 rounded-2xl skeleton-shimmer border border-brand-border/40 shadow-xs" />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="h-24 rounded-2xl bg-slate-100/80 border border-brand-line/50" />
+          <div key={i} className="h-24 rounded-2xl skeleton-shimmer border border-brand-border/40 shadow-xs" />
         ))}
       </div>
-      <div className="h-72 rounded-2xl bg-slate-100/80 border border-brand-line/50" />
+      <div className="h-80 rounded-2xl skeleton-shimmer border border-brand-border/40 shadow-xs" />
     </div>
   )
 }
@@ -88,6 +89,9 @@ export default function AppRoutes({ user, loading, onLogout }) {
         <Route path="/join" element={<JoinClassPage />} />
         <Route path="/join-class" element={<JoinClassPage />} />
         <Route path="/invite" element={<JoinClassPage />} />
+
+        {/* Supabase Authentication Callback Route */}
+        <Route path="/auth/callback" element={<AuthCallback />} />
 
         {/* Admin Protected Routes */}
         <Route

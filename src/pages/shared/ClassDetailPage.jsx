@@ -49,6 +49,7 @@ import {
   formatMessageDateSeparator,
   formatMessageTime,
   isDifferentDay,
+  sanitizeUrl,
 } from '../../utils/calculations'
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
@@ -1071,7 +1072,15 @@ export default function ClassDetailPage() {
               <Button
                 variant="primary"
                 icon={Plus}
-                onClick={() => navigate('/admin/assignments/create')}
+                onClick={() =>
+                  navigate(`/admin/assignments/create?classId=${currentClass?.id || classId}`, {
+                    state: {
+                      from: 'class',
+                      classId: currentClass?.id || classId,
+                      tab: 'assignments',
+                    },
+                  })
+                }
                 className="shadow-purple-glow font-semibold"
               >
                 Create Assignment
@@ -1227,7 +1236,7 @@ export default function ClassDetailPage() {
                             </span>
                             {mySub.submission_link && (
                               <a
-                                href={mySub.submission_link}
+                                href={sanitizeUrl(mySub.submission_link)}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="inline-flex items-center gap-1 text-brand-primary font-semibold hover:underline"
@@ -1271,7 +1280,15 @@ export default function ClassDetailPage() {
                           variant="primary"
                           size="sm"
                           icon={Eye}
-                          onClick={() => navigate(`/admin/assignments/${assignment.id}`)}
+                          onClick={() =>
+                            navigate(`/admin/assignments/${assignment.id}`, {
+                              state: {
+                                from: 'class',
+                                classId: currentClass?.id || classId,
+                                tab: 'assignments',
+                              },
+                            })
+                          }
                           className="shadow-purple-glow font-semibold"
                         >
                           View Submissions
@@ -1282,7 +1299,15 @@ export default function ClassDetailPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => navigate(`/student/assignments/${assignment.id}`)}
+                            onClick={() =>
+                              navigate(`/student/assignments/${assignment.id}`, {
+                                state: {
+                                  from: 'class',
+                                  classId: currentClass?.id || classId,
+                                  tab: 'assignments',
+                                },
+                              })
+                            }
                           >
                             View Details
                           </Button>
@@ -1293,7 +1318,15 @@ export default function ClassDetailPage() {
                           size="sm"
                           icon={Send}
                           className="shadow-purple-glow font-semibold"
-                          onClick={() => navigate(`/student/assignments/${assignment.id}`)}
+                          onClick={() =>
+                            navigate(`/student/assignments/${assignment.id}`, {
+                              state: {
+                                from: 'class',
+                                classId: currentClass?.id || classId,
+                                tab: 'assignments',
+                              },
+                            })
+                          }
                         >
                           Submit Work
                         </Button>
@@ -1771,7 +1804,7 @@ export default function ClassDetailPage() {
                 <div className="flex items-center justify-between pt-1 border-t border-brand-line/60">
                   <span className="text-brand-muted">Deliverable:</span>
                   <a
-                    href={gradingSubmission.submission_link}
+                    href={sanitizeUrl(gradingSubmission.submission_link)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-brand-primary font-semibold hover:underline inline-flex items-center gap-1"

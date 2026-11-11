@@ -12,6 +12,7 @@ import {
 import Modal from '../common/Modal'
 import Button from '../common/Button'
 import { classesService } from '../../services/classes.service'
+import { getAppUrl } from '../../utils/appUrl'
 
 export default function InviteStudentModal({ isOpen, onClose, currentClass }) {
   const [copiedCode, setCopiedCode] = useState(false)
@@ -22,7 +23,7 @@ export default function InviteStudentModal({ isOpen, onClose, currentClass }) {
   const classCode = classesService.getClassCode(currentClass)
   const formattedCode = `CLS-${classCode}`
   const inviteToken = classesService.generateInviteToken(currentClass.id)
-  const inviteUrl = `${window.location.origin}/join-class?code=${classCode}`
+  const inviteUrl = `${getAppUrl()}/join-class?code=${classCode}`
 
   const handleCopyCode = async () => {
     try {

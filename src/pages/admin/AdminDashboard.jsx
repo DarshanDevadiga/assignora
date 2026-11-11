@@ -298,7 +298,7 @@ export default function AdminDashboard() {
               return (
                 <div
                   key={cls.id}
-                  onClick={() => navigate(`/admin/assignments?classId=${cls.id}`)}
+                  onClick={() => navigate(`/admin/classes/${cls.id}`)}
                   className={`group p-5 rounded-2xl bg-white border shadow-card hover:shadow-card-hover transition-all cursor-pointer flex flex-col justify-between space-y-3 ${
                     selectedClass?.id === cls.id
                       ? 'border-brand-primary/80 ring-2 ring-brand-primary/10'
@@ -326,7 +326,7 @@ export default function AdminDashboard() {
 
                   <div className="pt-3 border-t border-brand-line/60 flex items-center justify-between text-xs">
                     <span className="text-brand-primary font-semibold group-hover:underline flex items-center gap-1">
-                      <span>View Course Assignments</span>
+                      <span>Open Class Details</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </span>
                   </div>
@@ -674,7 +674,11 @@ export default function AdminDashboard() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => navigate(`/admin/assignments/${a.id}`)}
+                        onClick={() =>
+                          navigate(`/admin/assignments/${a.id}`, {
+                            state: { from: 'class', classId: selectedClass?.id, tab: 'assignments' },
+                          })
+                        }
                       >
                         Track
                       </Button>
@@ -865,7 +869,11 @@ export default function AdminDashboard() {
               {upcomingAssignments.map((item) => (
                 <div
                   key={item.id}
-                  onClick={() => navigate(`/admin/assignments/${item.id}`)}
+                  onClick={() =>
+                    navigate(`/admin/assignments/${item.id}`, {
+                      state: { from: 'dashboard', classId: item.class_id },
+                    })
+                  }
                   className="p-3 rounded-xl bg-slate-50 border-l-4 border-l-brand-primary border-y border-r border-brand-line/60 hover:bg-slate-100 transition-all cursor-pointer"
                 >
                   <h5 className="text-xs font-semibold text-brand-heading truncate">

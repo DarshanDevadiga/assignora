@@ -123,6 +123,7 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
       isOpen={isOpen}
       onClose={handleClose}
       title="Join a Class"
+      subtitle={!success ? 'Enter your 6-character course code to preview and enrol.' : undefined}
       size="md"
     >
       <div className="space-y-5">
@@ -133,21 +134,25 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
               <div className="w-9 h-9 rounded-lg bg-brand-primary text-white flex items-center justify-center shrink-0 shadow-purple-glow">
                 <KeyRound className="w-5 h-5" />
               </div>
-              <div className="text-xs">
+              <div className="text-xs min-w-0">
                 <h4 className="font-semibold text-brand-heading">
                   Have a class code?
                 </h4>
-                <p className="text-brand-muted mt-0.5">
+                <p className="text-brand-muted mt-0.5 leading-relaxed">
                   Ask your teacher for the 6-character class code, then enter it below to join.
                 </p>
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-brand-heading">
+              <label
+                htmlFor="join-class-code-input"
+                className="block text-xs font-semibold text-brand-heading"
+              >
                 Class Enrolment Code <span className="text-brand-danger">*</span>
               </label>
               <input
+                id="join-class-code-input"
                 type="text"
                 placeholder="e.g. CLS-E2E398 or E2E398"
                 value={code}
@@ -156,23 +161,24 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
                   setError(null)
                 }}
                 maxLength={20}
-                className="w-full uppercase font-mono tracking-wider font-bold text-center text-lg py-3 px-4 rounded-xl border border-brand-line focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition-all"
+                className="w-full uppercase font-mono tracking-wider font-bold text-center text-base sm:text-lg py-3 px-4 rounded-xl border border-brand-line focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-brand-primary transition-all"
                 autoFocus
               />
             </div>
 
             {error && (
-              <div className="rounded-xl p-3 bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{error}</span>
+              <div className="rounded-xl p-3 bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span className="break-words">{error}</span>
               </div>
             )}
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-brand-line/60">
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5 pt-3 border-t border-brand-line/60">
               <Button
-                variant="secondary"
+                variant="outline"
                 type="button"
                 onClick={handleClose}
+                className="w-full sm:w-auto"
               >
                 Cancel
               </Button>
@@ -181,7 +187,7 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
                 type="submit"
                 loading={validating}
                 disabled={!code.trim() || validating}
-                className="shadow-purple-glow font-semibold"
+                className="w-full sm:w-auto shadow-purple-glow font-semibold"
                 icon={ArrowRight}
               >
                 Verify Code
@@ -197,7 +203,7 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
               <span className="text-[11px] font-semibold uppercase tracking-wider text-white/80 block">
                 Class Found
               </span>
-              <h3 className="text-lg font-bold text-white mt-1">{classPreview.name}</h3>
+              <h3 className="text-lg font-bold text-white mt-1 break-words">{classPreview.name}</h3>
               <p className="text-xs text-white/80">{classPreview.subject || 'Course'}</p>
 
               {classPreview.description && (
@@ -208,44 +214,46 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
             </div>
 
             {/* Instructor Details */}
-            <div className="rounded-xl p-3.5 bg-slate-50 border border-brand-line flex items-center justify-between text-xs">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-brand-light text-brand-primary flex items-center justify-center font-bold">
+            <div className="rounded-xl p-3.5 bg-slate-50 border border-brand-line flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-full bg-brand-light text-brand-primary flex items-center justify-center font-bold shrink-0">
                   {(classPreview.users?.name || classPreview.teacher?.name || 'P').charAt(0)}
                 </div>
-                <div>
+                <div className="min-w-0">
                   <span className="text-[11px] text-brand-muted block">Instructor</span>
-                  <strong className="text-brand-heading">
+                  <strong className="text-brand-heading block truncate">
                     {classPreview.users?.name || classPreview.teacher?.name || 'Faculty Member'}
                   </strong>
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 text-brand-muted">
+              <div className="flex items-center gap-1.5 text-brand-muted shrink-0">
                 <Users className="w-4 h-4" />
                 <span>{classPreview.student_count ?? classPreview.class_members?.length ?? 0} students enrolled</span>
               </div>
             </div>
 
             {error && (
-              <div className="rounded-xl p-3 bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{error}</span>
+              <div className="rounded-xl p-3 bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span className="break-words">{error}</span>
               </div>
             )}
 
-            <div className="flex items-center justify-between pt-2 border-t border-brand-line/60">
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2.5 pt-3 border-t border-brand-line/60">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setClassPreview(null)}
+                className="w-full sm:w-auto"
               >
                 Enter Different Code
               </Button>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center gap-2">
                 <Button
-                  variant="secondary"
+                  variant="outline"
                   size="sm"
                   onClick={handleClose}
+                  className="w-full sm:w-auto"
                 >
                   Cancel
                 </Button>
@@ -255,7 +263,7 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
                   loading={enrolling}
                   onClick={handleConfirmEnrollment}
                   icon={CheckCircle2}
-                  className="shadow-purple-glow font-semibold"
+                  className="w-full sm:w-auto shadow-purple-glow font-semibold"
                 >
                   Confirm & Join Class
                 </Button>
@@ -278,11 +286,12 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
                 You are now enrolled in <strong>{classPreview?.name}</strong>. Your dashboard and course list have been updated.
               </p>
             </div>
-            <div className="flex items-center justify-center gap-3 pt-2">
+            <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-center gap-2.5 pt-2">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleClose}
+                className="w-full sm:w-auto"
               >
                 Back to Dashboard
               </Button>
@@ -294,7 +303,7 @@ export default function JoinClassModal({ isOpen, onClose, onEnrolled }) {
                   handleClose()
                   navigate(`/student/classes/${classPreview.id}`)
                 }}
-                className="shadow-purple-glow font-semibold"
+                className="w-full sm:w-auto shadow-purple-glow font-semibold"
               >
                 Go to Class
               </Button>

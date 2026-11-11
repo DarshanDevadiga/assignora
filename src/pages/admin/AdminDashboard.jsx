@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Users,
@@ -55,6 +55,18 @@ export default function AdminDashboard() {
 
   // Create menu dropdown state
   const [createDropdownOpen, setCreateDropdownOpen] = useState(false)
+  const createDropdownRef = useRef(null)
+
+  useEffect(() => {
+    if (!createDropdownOpen) return undefined
+    const handleOutsideClick = (e) => {
+      if (createDropdownRef.current && !createDropdownRef.current.contains(e.target)) {
+        setCreateDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [createDropdownOpen])
 
   // Quick Create Class Modal
   const [isCreateClassModalOpen, setIsCreateClassModalOpen] = useState(false)
@@ -347,18 +359,18 @@ export default function AdminDashboard() {
           {selectedClass ? (
             <div className="relative overflow-hidden rounded-2xl purple-gradient-banner p-6 text-white shadow-xl">
               <div className="relative z-10 flex flex-col justify-between min-h-[140px]">
-                <div className="flex items-start justify-between">
-                  <div>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
                     {/* Class Selector Dropdown if multiple classes */}
                     {classes.length > 1 ? (
-                      <div className="relative inline-block mb-1">
+                      <div className="relative inline-block max-w-full mb-1">
                         <select
                           value={selectedClass.id}
                           onChange={(e) => {
                             const found = classes.find((c) => c.id === e.target.value)
                             if (found) handleSelectClass(found)
                           }}
-                          className="bg-white/20 hover:bg-white/30 text-white font-bold text-xl sm:text-2xl rounded-lg px-2 py-1 border border-white/20 focus:outline-none cursor-pointer appearance-none pr-8"
+                          className="max-w-full bg-white/20 hover:bg-white/30 text-white font-bold text-lg sm:text-2xl rounded-lg px-2 py-1 border border-white/20 focus:outline-none cursor-pointer appearance-none pr-8 truncate"
                         >
                           {classes.map((c) => (
                             <option key={c.id} value={c.id} className="text-brand-heading">
@@ -791,7 +803,7 @@ export default function AdminDashboard() {
         <div className="lg:col-span-4 space-y-5">
           
           {/* Solid Purple "+ Create" Button with Dropdown */}
-          <div className="relative">
+          <div className="relative" ref={createDropdownRef}>
             <div className="flex rounded-xl shadow-purple-glow">
               <Button
                 variant="primary"
@@ -808,7 +820,7 @@ export default function AdminDashboard() {
             </div>
 
             {createDropdownOpen && (
-              <div className="absolute right-0 left-0 mt-2 bg-white rounded-2xl shadow-modal border border-brand-line py-2 z-40">
+              <div className="absolute right-0 left-0 mt-2 bg-white rounded-2xl shadow-modal border border-brand-line py-2 z-dropdown">
                 <button
                   type="button"
                   onClick={() => {

@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {
   Bell,
@@ -13,6 +14,7 @@ import {
 import { notificationsService } from '../../services/notifications.service'
 import { formatTimeAgo } from '../../utils/calculations'
 import { useAuth } from '../../context/AuthContext'
+import { registerOverlay } from '../../utils/overlayManager'
 import Button from './Button'
 import Badge from './Badge'
 
@@ -27,8 +29,20 @@ export default function NotificationsDrawer({
   const navigate = useNavigate()
   const [filter, setFilter] = useState('all') // 'all' | 'unread'
   const [loadingAction, setLoadingAction] = useState(false)
+  const overlayIdRef = useRef(Symbol('notifications-drawer'))
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
 
-  if (!isOpen) return null
+  useEffect(() => {
+    if (!isOpen) return undefined
+    return registerOverlay(overlayIdRef.current, () => {
+      if (typeof onCloseRef.current === 'function') {
+        onCloseRef.current()
+      }
+    })
+  }, [isOpen])
+
+  if (!isOpen || typeof document === 'undefined') return null
 
   const unreadCount = notifications.filter((n) => !n.is_read).length
   const displayedNotifications = filter === 'unread'
@@ -101,16 +115,22 @@ export default function NotificationsDrawer({
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 overflow-hidden">
-      {/* Backdrop */}
+  return createPortal(
+    <div
+      className="fixed inset-0 z-drawer overflow-hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Notifications"
+    >
+      {/* Full-viewport Backdrop */}
       <div
-        className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity duration-200 animate-fade-in"
+        className="fixed inset-0 bg-slate-900/45 backdrop-blur-xs transition-opacity duration-200 animate-fade-in"
+        aria-hidden="true"
         onClick={onClose}
       />
 
-      <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
-        <div className="w-screen max-w-sm sm:max-w-md bg-white border-l border-brand-line shadow-2xl flex flex-col transform transition-transform duration-200 animate-slide-up">
+      <div className="fixed inset-y-0 right-0 max-w-full flex pl-6 sm:pl-10">
+        <div className="w-screen max-w-sm sm:max-w-md bg-white border-l border-brand-line shadow-2xl flex flex-col transform transition-transform duration-200 modal-enter">
           
           {/* Header */}
           <div className="p-5 border-b border-brand-line/60 flex items-center justify-between">
@@ -222,6 +242,7 @@ export default function NotificationsDrawer({
 
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

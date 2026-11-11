@@ -15,6 +15,7 @@ export default {
           activeNav: '#F1EDFF',
           border: '#DDD6FE',
           bg: '#F8F9FF',
+          appBg: '#F8F9FF',
           secondaryBg: '#F5F3FF',
           surface: '#FFFFFF',
           heading: '#111827',
@@ -84,7 +85,18 @@ export default {
         'card': '14px',
         'input': '9px',
         'btn': '9px',
-      }
+      },
+      backdropBlur: {
+        xs: '2px',
+      },
+      zIndex: {
+        header: '20',
+        dropdown: '30',
+        sidebar: '40',
+        drawer: '50',
+        modal: '60',
+        toast: '70',
+      },
     },
   },
   plugins: [],

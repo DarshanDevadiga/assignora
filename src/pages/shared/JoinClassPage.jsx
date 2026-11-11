@@ -118,14 +118,14 @@ export default function JoinClassPage() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-brand-appBg flex items-center justify-center">
+      <div className="min-h-screen bg-brand-bg flex items-center justify-center">
         <div className="animate-spin w-8 h-8 border-4 border-brand-primary border-t-transparent rounded-full" />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-brand-appBg flex flex-col justify-between p-4 sm:p-6 lg:p-8">
+    <div className="min-h-screen bg-brand-bg flex flex-col justify-between p-4 sm:p-6 lg:p-8">
       {/* Brand Header */}
       <header className="max-w-4xl mx-auto w-full flex items-center justify-between py-4">
         <div className="flex items-center gap-3">

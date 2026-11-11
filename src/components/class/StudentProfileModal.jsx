@@ -55,16 +55,16 @@ export default function StudentProfileModal({ isOpen, onClose, member }) {
 
         {/* Detailed Information Grid */}
         <div className="space-y-3">
-          <div className="rounded-xl p-3.5 bg-slate-50 border border-brand-line flex items-center justify-between text-xs">
-            <span className="text-brand-muted flex items-center gap-2 font-medium">
+          <div className="rounded-xl p-3.5 bg-slate-50 border border-brand-line flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="text-brand-muted flex items-center gap-2 font-medium shrink-0">
               <Mail className="w-4 h-4 text-slate-400" />
               Email Address
             </span>
-            <span className="font-semibold text-brand-heading">{student.email}</span>
+            <span className="font-semibold text-brand-heading break-all">{student.email}</span>
           </div>
 
-          <div className="rounded-xl p-3.5 bg-slate-50 border border-brand-line flex items-center justify-between text-xs">
-            <span className="text-brand-muted flex items-center gap-2 font-medium">
+          <div className="rounded-xl p-3.5 bg-slate-50 border border-brand-line flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="text-brand-muted flex items-center gap-2 font-medium shrink-0">
               <GraduationCap className="w-4 h-4 text-slate-400" />
               Student Registration ID
             </span>
@@ -73,16 +73,16 @@ export default function StudentProfileModal({ isOpen, onClose, member }) {
             </span>
           </div>
 
-          <div className="rounded-xl p-3.5 bg-slate-50 border border-brand-line flex items-center justify-between text-xs">
-            <span className="text-brand-muted flex items-center gap-2 font-medium">
+          <div className="rounded-xl p-3.5 bg-slate-50 border border-brand-line flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="text-brand-muted flex items-center gap-2 font-medium shrink-0">
               <Calendar className="w-4 h-4 text-slate-400" />
               Class Enrolment Date
             </span>
             <span className="font-semibold text-brand-heading">{joinedDate}</span>
           </div>
 
-          <div className="rounded-xl p-3.5 bg-slate-50 border border-brand-line flex items-center justify-between text-xs">
-            <span className="text-brand-muted flex items-center gap-2 font-medium">
+          <div className="rounded-xl p-3.5 bg-slate-50 border border-brand-line flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="text-brand-muted flex items-center gap-2 font-medium shrink-0">
               <CheckCircle2 className="w-4 h-4 text-slate-400" />
               Status
             </span>

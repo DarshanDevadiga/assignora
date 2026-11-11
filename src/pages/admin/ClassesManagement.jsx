@@ -85,6 +85,13 @@ export default function ClassesManagement() {
   // Active dropdown menu per card
   const [activeMenuId, setActiveMenuId] = useState(null)
 
+  useEffect(() => {
+    if (!activeMenuId) return undefined
+    const handleOutsideClick = () => setActiveMenuId(null)
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [activeMenuId])
+
   // Invite Modal State
   const [inviteModalClass, setInviteModalClass] = useState(null)
 
@@ -266,10 +273,12 @@ export default function ClassesManagement() {
               <div
                 key={cls.id}
                 onClick={() => navigate(`/${isTeacher ? 'admin' : 'student'}/classes/${cls.id}`)}
-                className="group relative bg-white rounded-2xl border border-brand-line/80 shadow-card hover:shadow-card-hover hover:border-brand-border transition-all duration-200 overflow-hidden cursor-pointer flex flex-col justify-between"
+                className={`group relative bg-white rounded-2xl border border-brand-line/80 shadow-card hover:shadow-card-hover hover:border-brand-border transition-all duration-200 cursor-pointer flex flex-col justify-between ${
+                  activeMenuId === cls.id ? 'z-dropdown' : ''
+                }`}
               >
                 {/* Colored Top Header Banner */}
-                <div className={`p-5 text-white ${theme.bg} relative`}>
+                <div className={`p-5 text-white ${theme.bg} relative rounded-t-2xl`}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-3 min-w-0">
                       <div className="w-10 h-10 rounded-xl bg-white/20 backdrop-blur-xs flex items-center justify-center shrink-0">
@@ -308,7 +317,8 @@ export default function ClassesManagement() {
 
                       {activeMenuId === cls.id && (
                         <div
-                          className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-modal border border-brand-line py-1 z-30 text-left"
+                          className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-modal border border-brand-line py-1 z-dropdown text-left"
+                          onMouseDown={(e) => e.stopPropagation()}
                           onClick={(e) => e.stopPropagation()}
                         >
                           <button
@@ -382,7 +392,7 @@ export default function ClassesManagement() {
                 </div>
 
                 {/* Body Meta Row */}
-                <div className="p-4 bg-slate-50/50 flex items-center justify-between border-t border-brand-line/60">
+                <div className="p-4 bg-slate-50/50 flex items-center justify-between border-t border-brand-line/60 rounded-b-2xl">
                   <div className="flex items-center gap-2">
                     <div className="w-7 h-7 rounded-full bg-brand-light text-brand-primary text-xs font-bold flex items-center justify-center">
                       {user?.name?.charAt(0) || 'P'}

@@ -5,7 +5,7 @@
 **Target Database:** `trkcagoxopabqerljgvn` (PostgreSQL 17.11 on Supabase ap-southeast-1)  
 **Production URL:** https://assignora-cyan.vercel.app/  
 **Repository:** https://github.com/DarshanDevadiga/assignora  
-**Last Updated:** 2026-11-11T21:40:00+05:30  
+**Last Updated:** 2026-11-11T22:50:00+05:30  
 
 ---
 
@@ -45,9 +45,10 @@
 | **Group Submission Cards Layout** | **PASS** | Replaced wide horizontal table with modern 2-column card grid (`GroupSubmissionCard.jsx`) across Admin, Professor, and Student dashboards |
 | **Group Assignments Initial Zero Fix** | **PASS** | Eliminated lazy-loading tab gating; immediate fetch on mount; state machine with skeletons & Retry; zero false empty states |
 | **Remove Quick Demo Accounts** | **PASS** | Removed Quick Demo Accounts section, buttons, and handlers from Login.jsx; balanced spacing; standard email/password auth preserved |
-| **Registration, Profiles & Class Enrollment RLS Fix** | **PARTIAL (Pending DB Approval)** | Fixed 406 `.single()`, added profile auto-provisioning, fixed 403/RLS enrollment pipeline; prepared SQL migration `20261111000000` awaiting approval |
+| **Registration, Profiles & Class Enrollment RLS Fix** | **PASS** | Fixed 406 `.single()`, added profile auto-provisioning, fixed 403/RLS enrollment pipeline; SQL migration `20261111162141` live applied & verified |
+| **Global UI/UX, Modal Portal & Responsive Repair** | **PASS** | Refactored Modal & NotificationsDrawer to `document.body` portals via shared `overlayManager`, removed CSS `transform` trap on `.page-enter`, added Tailwind z-index scale, fixed dropdown clipping, unified responsive shell across 7 viewports |
 | **Group Messages Migration** | **PENDING APPROVAL** | `20261110000002_round2_group_messages.sql` prepared with RLS, rollback & verification; awaiting approval |
-| **Production Build Check** | **PASS** | `vite build` completed cleanly (2185 modules transformed, 0 errors, built in 4.15s) |
+| **Production Build Check** | **PASS** | `vite build` completed cleanly (2186 modules transformed, 0 errors, built in 7.05s) |
 
 ---
 
@@ -334,6 +335,20 @@
       - Created rollback script `supabase/migrations/rollback_round2_registration_and_enrollment.sql`.
     - **Verification**: Created `scripts/verify-registration-profiles-and-enrollment-rls.js` passing 12/12 static and live Supabase checks.
 
+38. **Global UI/UX Repair — Portal Modals, Overlay Stack, Z-Index Architecture & Responsive Layouts (`Modal.jsx`, `NotificationsDrawer.jsx`, `overlayManager.js`, `DashboardLayout.jsx`, `Header.jsx`, `Sidebar.jsx`, `MobileNav.jsx`, `tailwind.config.js`, `index.css`, `JoinClassModal.jsx`, `InviteStudentModal.jsx`, `StudentProfileModal.jsx`, `AdminDashboard.jsx`, `ClassesManagement.jsx`, `GroupDetailsPage.jsx`, `JoinClassPage.jsx`, `AssignmentDetails.jsx`, `AppRoutes.jsx`)**:
+    - **Root Cause Fixed (Partial Modal Backdrop)**:
+      - `DashboardLayout.jsx` wrapped `<Outlet />` inside `.page-enter` whose `@keyframes slideUp` used `animation: ... forwards` ending at `transform: translate3d(0, 0, 0)`. CSS retained transforms create a containing block and stacking context that trapped `position: fixed` descendants inside `<main>` (offset by `lg:pl-64` and clipped below sticky `<Header>`).
+      - `Modal.jsx` and `NotificationsDrawer.jsx` rendered inline instead of portaling into `document.body`.
+    - **Global Portal & Overlay Coordination**:
+      - Created `src/utils/overlayManager.js` (`registerOverlay`) to coordinate stacked overlays (`activeOverlayIds`), lock `document.body.style.overflow = 'hidden'` cleanly until the final overlay closes, and handle top-most `Escape` key dismissal.
+      - Refactored `src/components/common/Modal.jsx` to render via `createPortal(..., document.body)` at `z-modal`, using a full-viewport backdrop (`fixed inset-0 bg-slate-900/55 backdrop-blur-xs`), ARIA attributes (`role="dialog"`, `aria-modal="true"`, `aria-labelledby`), focus capture/restoration, `MODAL_SIZE_MAP` (`sm`/`md`/`lg`/`xl`/`full`) + `maxWidth`, safe viewport margins (`p-4 sm:p-6`, removing `sm:p-0`), and internal scrollable body (`max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3rem)]`).
+      - Refactored `src/components/common/NotificationsDrawer.jsx` to portal into `document.body` at `z-drawer` via `registerOverlay`.
+    - **Semantic Z-Index & Layout Polish**:
+      - Added `zIndex` tokens (`header: 20`, `dropdown: 30`, `sidebar: 40`, `drawer: 50`, `modal: 60`, `toast: 70`), `backdropBlur.xs`, and `brand.appBg` (`#F8F9FF`) to `tailwind.config.js` and CSS variables in `src/index.css`; removed `forwards` from `.page-enter` and `.modal-enter`.
+      - Unified `DashboardLayout.jsx`, `Header.jsx` (added `aria-label="Notifications"`), `Sidebar.jsx` (`registerOverlay` Escape close), and `MobileNav.jsx`.
+      - Fixed clipped 3-dot dropdown menus in `ClassesManagement.jsx`, added outside-click closing for `AdminDashboard.jsx` Create dropdown, standardized `max-w-7xl` widths across `GroupDetailsPage.jsx`, `AssignmentDetails.jsx`, and `AppRoutes.jsx`, and improved responsive stacking in `JoinClassModal.jsx`, `InviteStudentModal.jsx`, and `StudentProfileModal.jsx`.
+    - **Verification**: Static suite `scripts/verify-global-ui-responsive-and-modals.js` passed 7/7 checks; headless Chrome E2E `scripts/verify-ui-browser-e2e.mjs` passed across all 7 viewports (`1920x1080`, `1440x900`, `1280x800`, `1024x768`, `768x1024`, `430x932`, `375x812`) for Student & Admin roles with 0 console errors and 0 uncaught page errors.
+
 ---
 
 ## 3. Database Migration Status
@@ -359,8 +374,10 @@
 
 | Test Suite | Command | Result | Notes |
 | :--- | :--- | :--- | :--- |
+| **Global UI/UX Portals & Responsive Layout (Static)** | `node --test scripts/verify-global-ui-responsive-and-modals.js` | **PASS** | 7/7 checks passed: `document.body` portals for `Modal` & `NotificationsDrawer`, `overlayManager` stack/Escape lock, z-index scale, no transform trap, shell & modal responsiveness |
+| **Multi-Viewport Browser E2E (Playwright/Chrome)** | `node scripts/verify-ui-browser-e2e.mjs` | **PASS** | All 7 viewports (`1920x1080`, `1440x900`, `1280x800`, `1024x768`, `768x1024`, `430x932`, `375x812`) verified against live preview + Supabase for Student & Admin flows, modals, drawers, Escape scroll unlock, 0 horizontal overflow, 0 console/page errors |
 | **Registration, Profiles & Enrollment RLS** | `node --env-file=.env --test scripts/verify-registration-profiles-and-enrollment-rls.js` | **PASS** | 12/12 tests passed: 406 .maybeSingle() fix, self-healing ensureUserProfile, zero-trust AuthContext/AuthCallback role handling, 403/RLS enrollment repair, live Student & Admin Supabase checks |
-| **Login Page & Auth Flow** | `node --test scripts/verify-login-page-and-auth-flow.js` | **PASS** | 11/11 tests passed: complete removal of Quick Demo Accounts UI & credentials, standard email/password form, password toggle, forgot password, /register link, live Professor & Student Supabase auth, invalid credential rejection |
+| **Login Page & Auth Flow** | `node --env-file=.env --test scripts/verify-login-page-and-auth-flow.js` | **PASS** | 11/11 tests passed: complete removal of Quick Demo Accounts UI & credentials, standard email/password form, password toggle, forgot password, /register link, live Professor & Student Supabase auth, invalid credential rejection |
 | **Group Assignments Initial Loading** | `node --test scripts/verify-group-assignments-initial-loading.js` | **PASS** | 23/23 tests passed: Immediate load on mount, no activeTab gating, state machine (loading/success/error/empty), skeleton loaders, Retry action, zero stale flash on group switch, live Supabase query confirming Demo/S/zdvvdvd |
 | **Group Submission Cards Layout** | `node --test scripts/verify-group-submission-cards.js` | **PASS** | 17/17 tests passed: Header with group name/leader/count, collapsible member chips, direct deliverable rendering (PDF/Office/Cloud/Code), submitter name resolution, grading display, staff vs student actions, unsubmitted state, 2-column card grid in tracking |
 | **Submission Pipeline & UUID Resolution** | `node --test scripts/verify-submission-data-pipeline-and-user-resolution.js` | **PASS** | 5/5 tests passed: live Supabase query on assignment zdvvdvd, web project deliverable classification, URL persistence, name resolution to Rahul Sharma (0 UUID leaks) |
@@ -368,7 +385,7 @@
 | **Grading Modal Lifecycle & Auth URL** | `node --test scripts/verify-grading-modal-lifecycle-and-auth-url.js` | **PASS** | 16/16 tests passed: modal visibility control, Promise.all concurrent loading, zero auto-open effects, deliverable status differentiation, centralized production URL helper, HTTPS enforcement, AuthCallback handler |
 | **Course Details & Deliverable Work Resolution** | `node --test scripts/verify-course-details-and-open-work.js` | **PASS** | 5/5 tests passed: `resolveDeliverableUrl` engine, `RoleRoute` cross-role translation, `AdminDashboard` course card routing to class details, sidebar persistence, class-specific assignment context |
 | **Admin View Work & Tracking UI** | `node --test scripts/verify-admin-view-work-and-tracking-ui.js` | **PASS** | 4/4 tests passed: View Work modal triggers, URL sanitization engine, metrics calculation, multi-file link audit |
-| **Vite Production Build** | `npm run build` | **PASS** | Built cleanly in 6.39s (`vite v6.4.5`, 0 errors) |
+| **Vite Production Build** | `npm run build` | **PASS** | Built cleanly in 7.05s (`vite v6.4.5`, 2186 modules transformed, 0 errors) |
 | **React Rules of Hooks Audit** | `node --test scripts/verify-rules-of-hooks-and-component-stability.js` | **PASS** | 5/5 tests passed: invariant hook order in `AssignmentDetails` & `CreateAssignment`, 0 ESLint hook errors across 65 files, package script validation |
 | **ESLint Complete Audit** | `npm run lint` | **PASS** | 0 errors, 173 warnings (`eslint src --ext .js,.jsx`) |
 | **Group Open Work & Realtime** | `node --test scripts/verify-group-assignment-open-work-and-realtime.js` | **PASS** | 9/9 tests passed: student navigation to `/student/assignments/:id`, fallback group lookup, OneDrive & group metadata display, shared Realtime channel, in-memory bus |

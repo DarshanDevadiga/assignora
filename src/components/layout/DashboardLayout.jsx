@@ -22,7 +22,7 @@ export default function DashboardLayout({ user, role = 'admin', onLogout }) {
   } = useNotifications()
 
   return (
-    <div className="min-h-screen bg-brand-bg flex">
+    <div className="min-h-screen w-full bg-brand-bg flex overflow-x-clip">
       {/* Desktop & Mobile Sidebar */}
       <Sidebar
         role={role}
@@ -46,7 +46,7 @@ export default function DashboardLayout({ user, role = 'admin', onLogout }) {
         />
 
         {/* Page Content */}
-        <main className="flex-1 px-4 sm:px-8 py-6 pb-20 lg:pb-8 max-w-7xl w-full mx-auto">
+        <main className="flex-1 px-4 sm:px-6 lg:px-8 py-6 pb-24 lg:pb-8 max-w-7xl w-full mx-auto">
           <ErrorBoundary>
             <div className="page-enter">
               <Outlet />

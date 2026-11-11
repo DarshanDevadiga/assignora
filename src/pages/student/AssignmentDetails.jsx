@@ -305,7 +305,7 @@ export default function AssignmentDetails() {
 
   if (loading) {
     return (
-      <div className="space-y-6 max-w-5xl mx-auto page-enter">
+      <div className="space-y-6">
         <div className="h-6 w-36 skeleton-shimmer rounded-md border border-brand-border/40" />
         <div className="h-28 skeleton-shimmer rounded-2xl border border-brand-border/40 shadow-xs" />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

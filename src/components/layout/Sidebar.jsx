@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useRef } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   Home,
@@ -13,6 +13,7 @@ import {
   X
 } from 'lucide-react'
 import NotificationBadge from '../common/NotificationBadge'
+import { registerOverlay } from '../../utils/overlayManager'
 
 export default function Sidebar({
   role = 'admin',
@@ -22,6 +23,18 @@ export default function Sidebar({
   unreadNotificationsCount = 0,
 }) {
   const location = useLocation()
+  const overlayIdRef = useRef(Symbol('mobile-sidebar'))
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
+  useEffect(() => {
+    if (!isOpen) return undefined
+    return registerOverlay(overlayIdRef.current, () => {
+      if (typeof onCloseRef.current === 'function') {
+        onCloseRef.current()
+      }
+    })
+  }, [isOpen])
 
   const adminNav = [
     { name: 'Dashboard', path: '/admin', icon: Home, end: true },
@@ -94,14 +107,15 @@ export default function Sidebar({
       {/* Mobile Backdrop */}
       {isOpen && (
         <div
-          className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-xs lg:hidden"
+          className="fixed inset-0 z-dropdown bg-slate-900/50 backdrop-blur-xs lg:hidden animate-fade-in"
+          aria-hidden="true"
           onClick={onClose}
         />
       )}
 
       {/* Sidebar container */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-brand-line flex flex-col transition-transform duration-300 ease-in-out lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-sidebar lg:z-header w-64 bg-white border-r border-brand-line flex flex-col transition-transform duration-300 ease-in-out lg:translate-x-0 ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >

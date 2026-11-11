@@ -447,7 +447,7 @@ export default function GroupDetailsPage() {
   // Loading Skeleton
   if (loading) {
     return (
-      <div className="space-y-6 max-w-6xl mx-auto p-4 sm:p-6 page-enter">
+      <div className="space-y-6">
         {/* Breadcrumb Skeleton */}
         <div className="h-5 w-64 skeleton-shimmer rounded-md border border-brand-border/40" />
         {/* Header Banner Skeleton */}
@@ -518,7 +518,7 @@ export default function GroupDetailsPage() {
   const rolePrefix = currentUser?.role === 'admin' ? '/admin' : '/student'
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-12">
+    <div className="space-y-6 pb-6">
       {/* 1. Breadcrumbs & Back Navigation */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-xs text-brand-muted flex-wrap">

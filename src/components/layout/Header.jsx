@@ -44,7 +44,7 @@ export default function Header({
   const displayEmail = user?.email || (role === 'admin' ? 'admin@assignora.demo' : 'student1@assignora.demo')
 
   return (
-    <header className="sticky top-0 z-30 h-20 bg-white/95 backdrop-blur-md border-b border-brand-line px-4 sm:px-8 flex items-center justify-between gap-4">
+    <header className="sticky top-0 z-header h-16 sm:h-20 bg-white/95 backdrop-blur-md border-b border-brand-line px-4 sm:px-6 lg:px-8 flex items-center justify-between gap-3 sm:gap-4">
       {/* Mobile Hamburger & Search */}
       <div className="flex items-center gap-3 flex-1 max-w-xl">
         <button
@@ -93,6 +93,7 @@ export default function Header({
         <button
           type="button"
           onClick={onOpenNotifications}
+          aria-label="Notifications"
           title={unreadNotifications > 0 ? `${unreadNotifications} unread notifications` : 'Notifications'}
           className="relative p-2 text-brand-muted hover:text-brand-heading hover:bg-slate-100 rounded-full transition-colors cursor-pointer"
         >
@@ -132,7 +133,7 @@ export default function Header({
 
           {/* Dropdown Menu */}
           {profileOpen && (
-            <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-modal border border-brand-line py-2 z-50">
+            <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-modal border border-brand-line py-2 z-dropdown">
               <div className="px-4 py-3 border-b border-brand-line/60">
                 <p className="text-sm font-semibold text-brand-heading truncate">{displayName}</p>
                 <p className="text-xs text-brand-muted truncate">{displayEmail}</p>

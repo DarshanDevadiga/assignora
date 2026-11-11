@@ -86,12 +86,12 @@ export default function InviteStudentModal({ isOpen, onClose, currentClass }) {
             Share this 6-character code with your students. They can enter it from their dashboard.
           </p>
 
-          <div className="flex items-center gap-2">
-            <div className="flex-1 bg-slate-50 border-2 border-dashed border-brand-border rounded-xl px-4 py-3 flex items-center justify-between">
-              <span className="font-mono text-xl font-black text-brand-primary tracking-widest">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <div className="flex-1 bg-slate-50 border-2 border-dashed border-brand-border rounded-xl px-4 py-3 flex items-center justify-between gap-2 min-w-0">
+              <span className="font-mono text-lg sm:text-xl font-black text-brand-primary tracking-widest truncate">
                 {formattedCode}
               </span>
-              <span className="text-[11px] font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+              <span className="text-[11px] font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 shrink-0">
                 Active Code
               </span>
             </div>
@@ -99,7 +99,7 @@ export default function InviteStudentModal({ isOpen, onClose, currentClass }) {
               variant={copiedCode ? 'success' : 'primary'}
               onClick={handleCopyCode}
               icon={copiedCode ? Check : Copy}
-              className="h-12 px-4 shadow-purple-glow"
+              className="h-11 sm:h-12 px-4 shadow-purple-glow shrink-0"
             >
               {copiedCode ? 'Copied!' : 'Copy Code'}
             </Button>
@@ -116,12 +116,12 @@ export default function InviteStudentModal({ isOpen, onClose, currentClass }) {
             Students who click this link can accept the invitation and instantly join this class.
           </p>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
             <input
               type="text"
               readOnly
               value={inviteUrl}
-              className="flex-1 bg-slate-50 border border-brand-line text-xs rounded-xl px-3.5 py-3 text-brand-body font-mono truncate focus:outline-none"
+              className="flex-1 min-w-0 bg-slate-50 border border-brand-line text-xs rounded-xl px-3.5 py-3 text-brand-body font-mono truncate focus:outline-none"
             />
             <Button
               variant={copiedLink ? 'success' : 'outline'}
@@ -136,7 +136,7 @@ export default function InviteStudentModal({ isOpen, onClose, currentClass }) {
 
         {/* Share Action & Status Footer */}
         <div className="pt-2 border-t border-brand-line/60 space-y-3">
-          <div className="flex items-center justify-between text-xs text-brand-muted">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-brand-muted">
             <div className="flex items-center gap-1.5 text-slate-500">
               <Clock className="w-4 h-4 text-brand-primary" />
               <span>Status: <strong className="text-brand-heading">Active</strong> • Valid for 7 days</span>

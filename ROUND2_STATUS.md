@@ -23,6 +23,9 @@
 | **Selective Allocation Guard** | **PASS** | Validates `assign_to_all` and `assignment_students` prior to group submission |
 | **Notification Realtime Dedup** | **PASS** | Channel reference tracking in `NotificationContext.jsx` prevents duplicate connections |
 | **Audio AbortError Guard** | **PASS** | Unhandled promise rejection suppression in `main.jsx` for browser audio interruptions |
+| **Admin Group Assignment Open Work** | **PASS** | Unified navigation reusing `/admin/assignments/:id?groupId=...` with auto-inspection modal & deliverable links |
+| **Post-Login Role Redirection** | **PASS** | Deterministic role-based redirects (`/admin` vs `/student`) eliminating cross-session `state.from` bleed |
+| **Logout Security Teardown** | **PASS** | Purges in-memory caches, unregisters Realtime channels, clears localStorage profile & sessionStorage |
 | **Group Messages Migration** | **PENDING APPROVAL** | `20261110000002_round2_group_messages.sql` prepared with RLS, rollback & verification; awaiting approval |
 | **Production Build Check** | **PASS** | `npm run build` completed cleanly (2180 modules bundled, 0 errors) |
 
@@ -138,6 +141,25 @@
     - Eliminates UI flicker where "Create Group" button and "You are not part of any group" banner previously flashed before membership loaded.
     - Renders smooth loading skeletons while verifying membership and safe retry alerts on database query error.
 
+18. **Admin Group Assignment Open Work (`GroupDetailsModal.jsx`, `GroupDetailsPage.jsx`, `SubmissionTracking.jsx`)**:
+    - Reused existing working `/admin/assignments/:assignmentId?groupId=:groupId&classId=:classId` route rendered by `SubmissionTracking.jsx`.
+    - Removed broken navigation to student-restricted routes that bounced administrators out to the dashboard.
+    - Added `searchParams.get('groupId')` auto-detection to automatically find and open the Group Submission Inspection & Grading Modal.
+    - Displays full deliverable link with prominent "Open Work in New Tab" button, assignment description, course OneDrive link (`Cloud` icon), leader notes, participating member pills, and score/feedback grading controls.
+    - History-safe cleanup of `groupId` from URL parameters when closing the modal so browser Back returns smoothly to the group details page.
+
+19. **Deterministic Post-Login Role Redirection (`Login.jsx`, `ProtectedRoute.jsx`)**:
+    - Eradicated cross-account session bleed where logging in as a different user restored the previous user's last visited page via `location.state.from`.
+    - Fresh login strictly navigates to the authenticated user's role dashboard (`/admin` for Professor/Admin, `/student` for Student) with `{ replace: true }`.
+    - Protected route unauthenticated redirect strips sticky `from` state (`<Navigate to="/login" replace />`).
+    - Seamlessly preserves public class join/invite URLs (`?code=...` or `/join-class`).
+
+20. **Comprehensive Logout Security Teardown (`AuthContext.jsx`)**:
+    - In-memory group/roster/assignment cache purged via `groupsService.invalidateGroupCache()`.
+    - All active Realtime WebSocket channels unregistered via `supabase.removeAllChannels()`.
+    - Cached profile removed from `localStorage` (`assignora_user_profile_cache`).
+    - Session storage completely cleared via `sessionStorage.clear()`.
+
 ---
 
 ## 3. Database Migration Status
@@ -160,7 +182,8 @@
 
 | Test Suite | Command | Result | Notes |
 | :--- | :--- | :--- | :--- |
-| **Vite Production Build** | `npm run build` | **PASS** | 2180 modules bundled in 15.85s, 0 errors |
+| **Vite Production Build** | `npm run build` | **PASS** | 2180 modules bundled in 7.99s, 0 errors |
+| **Admin Open Work & Login Redirect** | `node scripts/verify-admin-open-work-and-login-redirect.js` | **PASS** | 11/11 tests passed: route reuse, query param inspection, work modal metadata, back cleanup, role redirects, shared-device logout, cache purge |
 | **Group Page & Membership Flow** | `node scripts/verify-group-page-and-membership-flow.js` | **PASS** | 15/15 tests passed: authoritative membership query, getGroupById contract, assignment allocation filtering, chat deduplication |
 | **Group Chat & Assignment Filtering** | `node scripts/verify-group-chat-and-filtering.js` | **PASS** | 18/18 tests passed: optimistic reconciliation, zero duplicate messages, assignment filtering, leader auth, migration verification |
 | **Group Fixes & E2E Verification** | `node scripts/verify-group-fixes-e2e.js` | **PASS** | 8/8 test phases passed (Group creation, member join, relationship resolution, leader acknowledgement, timestamps, archival protection, join rejection, class roster) |

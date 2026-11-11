@@ -45,35 +45,29 @@ export default function Login() {
       const { profile } = await signIn(email.trim(), password)
       
       const targetRole = profile?.role || 'student'
+      const roleDashboard = targetRole === 'admin' ? '/admin' : '/student'
 
-      // Check query param 'redirect' or 'returnUrl' or code
+      // Check query param 'code' or explicit join/invite link
       const queryParams = new URLSearchParams(location.search)
-      const redirectParam = queryParams.get('redirect') || queryParams.get('returnUrl')
       const codeParam = queryParams.get('code')
-
-      if (redirectParam) {
-        navigate(redirectParam, { replace: true })
-        return
-      }
+      const redirectParam = queryParams.get('redirect') || queryParams.get('returnUrl')
 
       if (codeParam) {
         navigate(`/join-class?code=${encodeURIComponent(codeParam)}`, { replace: true })
         return
       }
 
-      const from = location.state?.from?.pathname
-      const fromSearch = location.state?.from?.search || ''
+      // Only respect redirectParam if it is an explicit public join or invitation link
       if (
-        from &&
-        (from.startsWith('/join') ||
-          from.startsWith('/invite') ||
-          (targetRole === 'admin' && from.startsWith('/admin')) ||
-          (targetRole === 'student' && from.startsWith('/student')))
+        redirectParam &&
+        (redirectParam.startsWith('/join') || redirectParam.startsWith('/invite'))
       ) {
-        navigate(from + fromSearch, { replace: true })
-      } else {
-        navigate(targetRole === 'admin' ? '/admin' : '/student', { replace: true })
+        navigate(redirectParam, { replace: true })
+        return
       }
+
+      // Always navigate to the user's role-specific dashboard on fresh login
+      navigate(roleDashboard, { replace: true })
     } catch (err) {
       console.error('[Login] Error signing in:', err)
       const msg = err.message || ''

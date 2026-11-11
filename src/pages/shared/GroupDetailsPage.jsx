@@ -972,7 +972,21 @@ export default function GroupDetailsPage() {
                           </Badge>
                         )}
 
-                        {item.submission?.submission_link ? (
+                        {canManage ? (
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => {
+                              navigate(
+                                `/admin/assignments/${item.id}?groupId=${group.id}&classId=${group.class_id}`
+                              )
+                            }}
+                            className="font-semibold text-xs shadow-purple-glow cursor-pointer"
+                            icon={FileText}
+                          >
+                            Open Work
+                          </Button>
+                        ) : item.submission?.submission_link ? (
                           <a
                             href={item.submission.submission_link}
                             target="_blank"
@@ -982,7 +996,7 @@ export default function GroupDetailsPage() {
                             <ExternalLink className="w-3.5 h-3.5" />
                             <span>View Deliverable</span>
                           </a>
-                        ) : isMember && (
+                        ) : (
                           <Link
                             to={`/student/assignments/${item.id}`}
                             className="inline-flex items-center gap-1 text-xs font-bold text-brand-primary hover:underline bg-brand-light px-2.5 py-1 rounded-lg cursor-pointer"

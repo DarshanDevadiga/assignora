@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react'
 import { authService } from '../services/auth.service'
+import { groupsService } from '../services/groups.service'
+import { supabase } from '../lib/supabase'
 
 const AuthContext = createContext(null)
 const CACHE_KEY = 'assignora_cached_profile'
@@ -102,7 +104,14 @@ export function AuthProvider({ children }) {
         setProfile(null)
         authService.clearProfileCache()
         try {
+          groupsService.invalidateGroupCache()
+        } catch (e) {}
+        try {
+          supabase.removeAllChannels()
+        } catch (e) {}
+        try {
           localStorage.removeItem(CACHE_KEY)
+          sessionStorage.clear()
         } catch (e) {}
       }
     })
@@ -152,8 +161,18 @@ export function AuthProvider({ children }) {
     // Synchronously purge state & localStorage so UI responds with zero lag
     setAuthUser(null)
     setProfile(null)
+
+    try {
+      groupsService.invalidateGroupCache()
+    } catch (e) {}
+
+    try {
+      supabase.removeAllChannels()
+    } catch (e) {}
+
     try {
       localStorage.removeItem(CACHE_KEY)
+      sessionStorage.clear()
     } catch (e) {}
 
     // Run remote sign out in background

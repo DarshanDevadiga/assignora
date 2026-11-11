@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { useNavigate, Link } from 'react-router-dom'
 import {
   Users,
   Crown,
@@ -47,6 +48,7 @@ export default function GroupDetailsModal({
   isUserInAnyGroup = false,
   onGroupUpdated
 }) {
+  const navigate = useNavigate()
   const [currentGroup, setCurrentGroup] = useState(group)
   const [activeTab, setActiveTab] = useState('overview') // 'overview', 'members', 'assignments', 'chat'
   const [assignmentHistory, setAssignmentHistory] = useState([])
@@ -863,16 +865,40 @@ export default function GroupDetailsModal({
                             </Badge>
                           )}
 
-                          {item.submission?.submission_link && (
+                          {/* For Admin/Professor: Open Work in SubmissionTracking */}
+                          {canManage ? (
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={() => {
+                                if (onClose) onClose()
+                                navigate(
+                                  `/admin/assignments/${item.id}?groupId=${currentGroup.id}&classId=${currentGroup.class_id}`
+                                )
+                              }}
+                              className="font-semibold text-xs shadow-purple-glow cursor-pointer"
+                              icon={FileText}
+                            >
+                              Open Work
+                            </Button>
+                          ) : item.submission?.submission_link ? (
                             <a
                               href={item.submission.submission_link}
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-primary hover:underline bg-brand-light px-2 py-1 rounded cursor-pointer"
+                              className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-primary hover:underline bg-brand-light px-2.5 py-1 rounded cursor-pointer"
                             >
                               <ExternalLink className="w-3 h-3" />
                               <span>Deliverable</span>
                             </a>
+                          ) : (
+                            <Link
+                              to={`/student/assignments/${item.id}`}
+                              className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-primary hover:underline bg-brand-light px-2.5 py-1 rounded cursor-pointer"
+                            >
+                              <span>Open Assignment</span>
+                              <ChevronRight className="w-3 h-3" />
+                            </Link>
                           )}
                         </div>
                       </div>

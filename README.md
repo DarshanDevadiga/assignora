@@ -235,6 +235,39 @@ Round 2 elevates Assignora from a working prototype into an intuitive, polished 
     - **Student Member**: Actual sender name, clean member styling.
   - Fully responsive on mobile, tablet, and desktop without text truncation or layout breakage.
 
+### 4.12 Admin Group Assignment Open Work & Post-Login Redirection Architecture
+- **Admin Group Assignment "Open Work" Navigation (`GroupDetailsModal.jsx` & `GroupDetailsPage.jsx`)**:
+  - In group submission tracking, clicking "Open Work" previously navigated to student-restricted routes (`/student/assignments/:id`) which were blocked by `RoleRoute` and bounced to the dashboard without showing work.
+  - Reused the existing, authoritative assignment-detail and work-view component: `/admin/assignments/:assignmentId?groupId=:groupId&classId=:classId` handled by `SubmissionTracking.jsx`.
+  - Passed canonical database IDs (`assignmentId`, `groupId`, `classId`) without confusing entity relationships.
+- **Automatic Group Work Focus & Inspection Modal (`SubmissionTracking.jsx`)**:
+  - `SubmissionTracking.jsx` now automatically inspects `searchParams.get('groupId')` upon load. When present, it automatically locates the submitted group within the verified group roster and opens the Group Submission & Grading Modal.
+  - Displays comprehensive assignment & submission metadata:
+    - Assignment title and description.
+    - Cloud storage references: course OneDrive link (`Cloud` icon) and Google Drive links.
+    - Group metadata: Group name, Group Leader (with Crown badge), and full roster of participating members.
+    - Submission deliverable link with a prominent **"Open Work in New Tab"** button.
+    - Student/leader submission notes.
+    - Verified submission timestamp and acknowledgement status.
+    - Complete grading controls (Score/Marks input, Feedback textarea, and Grade submission button).
+  - Closing the modal cleans up `groupId` from URL parameters cleanly via `setSearchParams` without pushing duplicate history entries, ensuring the browser Back button returns smoothly to the referring group details page.
+- **Deterministic Post-Login Role Redirection (`Login.jsx`)**:
+  - Resolved root cause of post-login navigation errors where a newly logged-in user landed on the previous user's last visited page because unauthenticated routes stored `location.state.from`.
+  - After any explicit logout followed by fresh login, login navigation now strictly directs users to their authenticated role dashboard:
+    - **Student**: Always lands on `/student`.
+    - **Professor / Admin**: Always lands on `/admin`.
+  - Removed sticky `location.state?.from` redirection, preventing cross-user session navigation bleed on shared devices (e.g. Student A logs out -> Student B logs in -> lands cleanly on `/student`, never on Student A's page).
+  - Preserved intentional public entry links: direct class join and invitation links (e.g. `?code=XYZ` or `/join-class`) are recognized and honored so students can seamlessly join courses upon logging in.
+- **Clean Protected Route Redirects (`ProtectedRoute.jsx`)**:
+  - Unauthenticated access attempts redirect to `/login` with `replace: true` without saving sticky `from` state that could pollute subsequent login sessions.
+- **Cross-Account Data Leakage Prevention on Logout (`AuthContext.jsx`)**:
+  - Explicit logout (`signOut` and Supabase `SIGNED_OUT` auth events) now triggers a comprehensive security teardown:
+    - Invokes `groupsService.invalidateGroupCache()` to purge all in-memory group rosters, assignment histories, and membership caches.
+    - Invokes `supabase.removeAllChannels()` to unregister and tear down all active Realtime WebSocket subscriptions (preventing cross-tenant background message alerts).
+    - Removes cached profile from `localStorage` (`assignora_user_profile_cache`).
+    - Purges all temporary keys in `sessionStorage.clear()`.
+    - Resets `authUser` and `profile` states to `null`.
+
 ---
 
 ## 5. Task 1 vs Task 2 Comparison

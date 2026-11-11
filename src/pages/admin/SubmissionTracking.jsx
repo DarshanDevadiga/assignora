@@ -351,6 +351,33 @@ export default function SubmissionTracking() {
     setIsGroupDetailModalOpen(true)
   }
 
+  // Close Group Grading Modal and clear groupId query param
+  const handleCloseGroupModal = () => {
+    setIsGroupDetailModalOpen(false)
+    if (searchParams.get('groupId')) {
+      const newParams = new URLSearchParams(searchParams)
+      newParams.delete('groupId')
+      setSearchParams(newParams, { replace: true })
+    }
+  }
+
+  // Auto-inspect group if groupId is passed via URL query parameters
+  const targetGroupId = searchParams.get('groupId')
+  useEffect(() => {
+    if (
+      targetGroupId &&
+      isGroupAssignment &&
+      (groupRows.submitted.length > 0 || groupRows.notSubmitted.length > 0)
+    ) {
+      const match =
+        groupRows.submitted.find((g) => g.id === targetGroupId) ||
+        groupRows.notSubmitted.find((g) => g.id === targetGroupId)
+      if (match && (!inspectedGroup || inspectedGroup.id !== match.id)) {
+        openGroupGradingModal(match)
+      }
+    }
+  }, [targetGroupId, isGroupAssignment, groupRows])
+
   // Save / Update Group Grade in Supabase
   const handleSaveGroupGrade = async (e) => {
     e.preventDefault()
@@ -375,7 +402,7 @@ export default function SubmissionTracking() {
       )
 
       await loadAssignmentDetails(currentAssignment.id)
-      setIsGroupDetailModalOpen(false)
+      handleCloseGroupModal()
     } catch (err) {
       console.error('[SubmissionTracking] Error saving group grade:', err)
       setGroupGradeError(err.message || 'Failed to save group grade.')
@@ -1681,9 +1708,10 @@ export default function SubmissionTracking() {
       {inspectedGroup && (
         <Modal
           isOpen={isGroupDetailModalOpen}
-          onClose={() => setIsGroupDetailModalOpen(false)}
-          title={`Grade Group: ${inspectedGroup.name}`}
+          onClose={handleCloseGroupModal}
+          title={`Group Submission Work: ${inspectedGroup.name}`}
           subtitle={`Leader: ${inspectedGroup.leaderName} • ${inspectedGroup.memberNames.length} Members`}
+          size="lg"
         >
           <form onSubmit={handleSaveGroupGrade} className="space-y-4">
             {groupGradeError && (
@@ -1694,16 +1722,56 @@ export default function SubmissionTracking() {
             )}
 
             {/* Group & Deliverable Info Card */}
-            <div className="rounded-xl p-4 bg-slate-50 border border-brand-line space-y-2.5 text-xs">
+            <div className="rounded-xl p-4 bg-slate-50 border border-brand-line space-y-3 text-xs">
               <div className="flex items-center justify-between">
                 <span className="text-brand-muted">Assignment:</span>
-                <strong className="text-brand-heading">{currentAssignment?.title}</strong>
+                <strong className="text-brand-heading text-sm">{currentAssignment?.title}</strong>
+              </div>
+
+              {currentAssignment?.description && (
+                <div className="space-y-1 pt-1 border-t border-brand-line/60">
+                  <span className="text-brand-muted block font-medium">Assignment Description:</span>
+                  <p className="text-brand-heading bg-white p-2.5 rounded-lg border border-brand-line leading-relaxed text-[11px]">
+                    {currentAssignment.description}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-1 border-t border-brand-line/60">
+                <span className="text-brand-muted">Submission Status:</span>
+                <Badge
+                  variant={
+                    inspectedGroup.isGraded
+                      ? 'success'
+                      : inspectedGroup.isSubmitted
+                      ? 'primary'
+                      : 'warning'
+                  }
+                  size="sm"
+                  dot
+                >
+                  {inspectedGroup.isGraded
+                    ? `Graded (${inspectedGroup.marks} / ${currentAssignment?.points || 100})`
+                    : inspectedGroup.isSubmitted
+                    ? 'Submitted'
+                    : 'Pending Submission'}
+                </Badge>
               </div>
 
               <div className="flex items-center justify-between">
-                <span className="text-brand-muted">Acknowledged By:</span>
-                <span className="font-semibold text-emerald-700">{inspectedGroup.acknowledged_by}</span>
+                <span className="text-brand-muted">Group Leader:</span>
+                <span className="inline-flex items-center gap-1 font-semibold text-amber-800">
+                  <Crown className="w-3.5 h-3.5 text-amber-600" />
+                  {inspectedGroup.leaderName}
+                </span>
               </div>
+
+              {inspectedGroup.acknowledged_by && (
+                <div className="flex items-center justify-between">
+                  <span className="text-brand-muted">Acknowledged By:</span>
+                  <span className="font-semibold text-emerald-700">{inspectedGroup.acknowledged_by}</span>
+                </div>
+              )}
 
               {inspectedGroup.acknowledged_at && (
                 <div className="flex items-center justify-between">
@@ -1718,17 +1786,37 @@ export default function SubmissionTracking() {
                 </div>
               )}
 
-              {inspectedGroup.submission_link && (
+              {inspectedGroup.submission_link ? (
                 <div className="pt-2 border-t border-brand-line/60 flex items-center justify-between gap-3">
-                  <span className="text-brand-muted">Deliverable Link:</span>
+                  <span className="text-brand-muted font-medium">Submitted Deliverable:</span>
                   <a
                     href={inspectedGroup.submission_link}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-brand-primary font-bold hover:underline"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-primary text-white font-bold hover:bg-brand-primaryHover transition-all shadow-xs"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Open Group Deliverable</span>
+                    <span>Open Work in New Tab</span>
+                  </a>
+                </div>
+              ) : (
+                <div className="pt-2 border-t border-brand-line/60 flex items-center justify-between text-slate-400 italic">
+                  <span>Submitted Deliverable:</span>
+                  <span>No deliverable link submitted</span>
+                </div>
+              )}
+
+              {currentAssignment?.onedrive_link && (
+                <div className="pt-2 border-t border-brand-line/60 flex items-center justify-between gap-3">
+                  <span className="text-brand-muted font-medium">Course OneDrive:</span>
+                  <a
+                    href={currentAssignment.onedrive_link}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 text-blue-600 font-bold hover:underline"
+                  >
+                    <Cloud className="w-3.5 h-3.5" />
+                    <span>Open OneDrive Folder</span>
                   </a>
                 </div>
               )}
@@ -1807,7 +1895,7 @@ export default function SubmissionTracking() {
                 variant="secondary"
                 size="sm"
                 type="button"
-                onClick={() => setIsGroupDetailModalOpen(false)}
+                onClick={handleCloseGroupModal}
               >
                 Cancel
               </Button>

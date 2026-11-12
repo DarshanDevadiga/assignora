@@ -5,13 +5,16 @@
 **Target Database:** `trkcagoxopabqerljgvn` (PostgreSQL 17.11 on Supabase ap-southeast-1)  
 **Production URL:** https://assignora-cyan.vercel.app/  
 **Repository:** https://github.com/DarshanDevadiga/assignora  
-**Last Updated:** 2026-11-12T08:03:00+05:30  
+**Last Updated:** 2026-11-12T10:07:30+05:30  
 
 ---
 
 ## 1. Overall Progress Summary
 
 | Phase / Objective | Status | Notes |
+| :--- | :--- | :--- |
+| **Safe Management Actions (Classes, Groups, Assignments)** | **PASS** | Added 3-dot `ActionMenu`, `EditClassModal`, `EditGroupModal`, `ConfirmDeleteModal`, `ToastProvider`, impact summaries, archival workflows, student delete prevention, and submission-locked assignment editing across Admin/Professor/Student interfaces |
+| **Staged Management SQL Migration Package** | **PASS (LIVE APPLIED & VERIFIED)** | Executed by owner on `trkcagoxopabqerljgvn` and verified read-only via `supabase_mcp`: 4 `classes` columns + `classes_status_check`, 7 `SECURITY DEFINER` (`pg_catalog, pg_temp`) functions, 2 `BEFORE DELETE` preservation triggers, student group-delete blocking active, and all existing data preserved (`classes: 11, assignments: 29, groups: 6, submissions: 39, group_submissions: 6`) |
 | :--- | :--- | :--- |
 | **Phase 1: Full System Audit** | **PASS** | Validated 9 Round 1 tables, 10 functions, and live schema |
 | **Manifest Ownership Tracking** | **PASS** | 57 total objects recorded in `_assignora_migration_manifest` |
@@ -49,11 +52,17 @@
 | **Global UI/UX, Modal Portal & Responsive Repair** | **PASS** | Refactored Modal & NotificationsDrawer to `document.body` portals via shared `overlayManager`, removed CSS `transform` trap on `.page-enter`, added Tailwind z-index scale, fixed dropdown clipping, unified responsive shell across 7 viewports |
 | **Full Application Performance Optimization** | **PASS** | Route/modal/icon/confetti code-splitting (`index.js` 76.6→52.8 kB, `ClassDetailPage` 102.3→50.8 kB), hover/idle route prefetching, `dataCache` SWR + in-flight dedup, `Promise.all` parallelization & duplicate query elimination, memoized contexts/cards, lazy image decoding |
 | **Group Messages Migration** | **PASS** | `20261110000002_round2_group_messages.sql` live applied & verified (`public.group_messages` active with RLS; 7 objects in manifest) |
-| **Production Build Check** | **PASS** | `vite build` completed cleanly (2188 modules transformed, 0 errors, built in 8.85s) |
+| **Production Build Check** | **PASS** | `vite build` completed cleanly (0 errors) |
 
 ---
 
 ## 2. Concrete Work Completed
+
+0. **Safe Admin/Professor Management Actions (`2026-11-12`)**:
+   - **Shared Infrastructure**: Created [ToastContext.jsx](file:///c:/Project/assignora/src/context/ToastContext.jsx) (mounted in [App.jsx](file:///c:/Project/assignora/src/App.jsx)), [ActionMenu.jsx](file:///c:/Project/assignora/src/components/common/ActionMenu.jsx), [ConfirmDeleteModal.jsx](file:///c:/Project/assignora/src/components/common/ConfirmDeleteModal.jsx), [EditClassModal.jsx](file:///c:/Project/assignora/src/components/class/EditClassModal.jsx), and [EditGroupModal.jsx](file:///c:/Project/assignora/src/components/group/EditGroupModal.jsx).
+   - **Service Safeguards**: Hardened [classes.service.js](file:///c:/Project/assignora/src/services/classes.service.js), [assignments.service.js](file:///c:/Project/assignora/src/services/assignments.service.js), and [groups.service.js](file:///c:/Project/assignora/src/services/groups.service.js) with `getClassImpactSummary`, `getAssignmentImpactSummary`, `getGroupImpactSummary`, `archiveAssignment`, `restoreAssignment`, `archiveCourseGroup`, `updateGroupDetails`, and strict refusal of destructive cascades whenever submissions, grades, assignments, groups, or members exist.
+   - **UI Integration & Role Guards**: Wired 3-dot `ActionMenu`, edit modals, and `ConfirmDeleteModal` across [AdminDashboard.jsx](file:///c:/Project/assignora/src/pages/admin/AdminDashboard.jsx), [ClassesManagement.jsx](file:///c:/Project/assignora/src/pages/admin/ClassesManagement.jsx), [ClassDetailPage.jsx](file:///c:/Project/assignora/src/pages/shared/ClassDetailPage.jsx), [AssignmentsList.jsx](file:///c:/Project/assignora/src/pages/admin/AssignmentsList.jsx), [CreateAssignment.jsx](file:///c:/Project/assignora/src/pages/admin/CreateAssignment.jsx), [SubmissionTracking.jsx](file:///c:/Project/assignora/src/pages/admin/SubmissionTracking.jsx), [ClassGroupsTab.jsx](file:///c:/Project/assignora/src/components/class/ClassGroupsTab.jsx), [GroupDetailsModal.jsx](file:///c:/Project/assignora/src/components/group/GroupDetailsModal.jsx), and [GroupDetailsPage.jsx](file:///c:/Project/assignora/src/pages/shared/GroupDetailsPage.jsx); removed student leader group disband/delete actions across [GroupManagementModal.jsx](file:///c:/Project/assignora/src/components/group/GroupManagementModal.jsx), [GroupDetailsModal.jsx](file:///c:/Project/assignora/src/components/group/GroupDetailsModal.jsx), and [GroupDetailsPage.jsx](file:///c:/Project/assignora/src/pages/shared/GroupDetailsPage.jsx).
+   - **Staged SQL Migration (LIVE APPLIED & VERIFIED)**: Created and applied [20261112000000_round2_safe_management_actions.sql](file:///c:/Project/assignora/supabase/migrations/20261112000000_round2_safe_management_actions.sql) with [post_migration_verification_management.sql](file:///c:/Project/assignora/supabase/migrations/post_migration_verification_management.sql) and [rollback_round2_management_actions.sql](file:///c:/Project/assignora/supabase/migrations/rollback_round2_management_actions.sql). Live read-only verification on `trkcagoxopabqerljgvn` confirmed all 4 `classes` columns (`academic_year`, `archived_at`, `semester`, `status`), `classes_status_check`, all 7 `SECURITY DEFINER` functions with `search_path=pg_catalog, pg_temp`, both `BEFORE DELETE` triggers (`trg_prevent_unsafe_assignment_deletion`, `trg_prevent_unsafe_class_deletion`), and untouched row counts (`classes: 11, assignments: 29, groups: 6, submissions: 39, group_submissions: 6`).
 
 1. **Class People Directory Overhaul (`ClassDetailPage.jsx`)**:
    - Fixed bug where students only saw themselves due to strict peer RLS policies.
@@ -420,8 +429,23 @@
 
 ---
 
-## 5. Next Steps
+## 5. Next Steps & Data Refresh Audit (2026-11-12)
 
-1. Configure Supabase Auth Dashboard manual settings (Redirect URLs for `https://assignora-cyan.vercel.app/auth/callback` and `https://assignora-cyan.vercel.app/login`, plus Leaked Password Protection).
-2. Request Darshan's explicit approval to push local changes to GitHub `origin/main` and deploy to Vercel production (`https://assignora-cyan.vercel.app/`).
-3. Perform interactive browser verification on production after Vercel deployment (new student signup + email verification callback + join class with code).
+1. **Completed Previously:** Performance optimizations (`8ee4bf8`) pushed to `origin/main` and verified live (`HTTP/1.1 200 OK`) on `https://assignora-cyan.vercel.app/`.
+2. **Production DB Audit, Backup & SQL Ops Generation (`trkcagoxopabqerljgvn`):**
+   - Verified 15 `public` tables (`users`: 8, `classes`: 9, `class_members`: 24, `assignments`: 30, `assignment_students`: 2, `submissions`: 32, `announcements`: 37, `notifications`: 130, `class_messages`: 8, `groups`: 5, `group_members`: 11, `group_submissions`: 5, `group_messages`: 3, `faculty_invitations`: 0, `_assignora_migration_manifest`: 62) and `storage.buckets`: 0 / `storage.objects`: 0.
+   - Confirmed `auth.users` count = 8 (`0` orphans), including genuine account `darshan@pim.ac.in` (`0f1f2c54-c7fb-4a84-804f-022733635da3`).
+   - Created verified local JSON backup snapshot (`scratch/prod_backup_2026-11-12.json`, 165,502 bytes) with exact 15-table row parity.
+   - Generated & validated `supabase/ops/cleanup_round2_test_data.sql` (Option B cleanup), `supabase/ops/rollback_round2_test_data.sql` (70-row exact restoration), and `supabase/ops/seed_round2_demo_data.sql` (Phase 4 idempotent demo dataset across 3 courses, 5 groups, 9 assignments, group & individual submissions, announcements, messages, notifications).
+   - Attempted Option B cleanup execution via `supabase_mcp` `execute_sql` after user approval: **BLOCKED** by MCP host confirmation auto-cancellation (`"The client cancelled this confirmation 0.2 s after it was sent. Nothing was run."`). Neither `.env` (`VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_APP_URL`) nor `npx supabase` has direct privileged DB access without interactive SQL Editor / service credentials.
+   - **Live database remains UNCHANGED.**
+3. **Manual Execution Required From Darshan (Supabase Dashboard -> SQL Editor on `trkcagoxopabqerljgvn`):**
+   - Step 1: Run `supabase/ops/cleanup_round2_test_data.sql` (asserts exact 70 deleted rows atomically).
+   - Step 2: Run `supabase/ops/seed_round2_demo_data.sql` (seeds clean Round 2 demo dataset using `.demo` accounts only).
+   - Step 3: Reply `"done"` so Phase 5 post-refresh database + live UI verification and verification script updates can run.
+
+4. **Completed README Documentation Update (Task 1 + Task 2 — 2026-11-12):**
+   - Replaced stale `README.md` with verified Task 1 + Task 2 documentation (`845` lines, `27` sections, `2` Mermaid diagrams covering architecture and ER relationships).
+   - Verified all `15` PostgreSQL tables, column constraints, foreign keys, triggers (`3`), functions (`30`), indexes (`54`), RLS policies, and `supabase_realtime` publications (`6` tables) directly against live DB `trkcagoxopabqerljgvn` and source files in `src/`.
+   - Removed all quick-demo credentials, `"Quick Demo"` UI instructions, hardcoded `eyJhbGci` token prefix, concrete `trkcagoxopabqerljgvn.supabase.co` URL, and `Demo Video` placeholder link.
+   - Re-verified `npm run lint` (`0` errors, `162` warnings) and `npm run build` (`vite build` succeeded in `10.18s`).

@@ -22,14 +22,20 @@ import {
   MessageCircle,
   ChevronRight,
   Info,
-  RefreshCw
+  RefreshCw,
+  Edit2,
+  Archive
 } from 'lucide-react'
 import Modal from '../common/Modal'
 import Button from '../common/Button'
 import Badge from '../common/Badge'
+import ActionMenu from '../common/ActionMenu'
+import ConfirmDeleteModal from '../common/ConfirmDeleteModal'
 import { Textarea } from '../common/Input'
 import AddGroupMembersModal from './AddGroupMembersModal'
+import EditGroupModal from './EditGroupModal'
 import { groupsService } from '../../services/groups.service'
+import { useToast } from '../../context/ToastContext'
 import { reconcileAndDeduplicateMessages } from '../../services/messages.service'
 import { supabase } from '../../lib/supabase.js'
 import {
@@ -51,6 +57,7 @@ export default function GroupDetailsModal({
   onGroupUpdated
 }) {
   const navigate = useNavigate()
+  const toast = useToast()
   const [currentGroup, setCurrentGroup] = useState(group)
   const [activeTab, setActiveTab] = useState('overview') // 'overview', 'members', 'assignments', 'chat'
   const [assignmentHistory, setAssignmentHistory] = useState([])
@@ -71,9 +78,13 @@ export default function GroupDetailsModal({
 
   // Sub-modals
   const [isAddMembersOpen, setIsAddMembersOpen] = useState(false)
+  const [isEditGroupOpen, setIsEditGroupOpen] = useState(false)
   const [memberToTransfer, setMemberToTransfer] = useState(null)
   const [isConfirmLeaveOpen, setIsConfirmLeaveOpen] = useState(false)
   const [isConfirmDisbandOpen, setIsConfirmDisbandOpen] = useState(false)
+  const [groupImpact, setGroupImpact] = useState(null)
+  const [groupImpactLoading, setGroupImpactLoading] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   const members = currentGroup?.members || []
   const isLeader = currentUser?.id === currentGroup?.leader_id
@@ -413,19 +424,58 @@ export default function GroupDetailsModal({
     }
   }
 
-  // 8. Disband Group
-  const handleConfirmDisbandGroup = async () => {
+  // 8. Safe Delete / Archive Group (Admin / Professor only)
+  const openDeleteDialog = async () => {
+    if (!currentGroup?.id || !isTeacher) return
+    setIsConfirmDisbandOpen(true)
+    setDeleteError('')
+    setGroupImpact(null)
+    setGroupImpactLoading(true)
+    try {
+      const summary = await groupsService.getGroupImpactSummary(currentGroup.id)
+      setGroupImpact(summary)
+    } catch (err) {
+      setDeleteError(err.message || 'Failed to inspect group history.')
+    } finally {
+      setGroupImpactLoading(false)
+    }
+  }
+
+  const handleArchiveGroup = async () => {
+    if (!currentGroup?.id || !isTeacher) return
     try {
       setActionLoading(true)
-      setModalFeedback({ type: '', text: '' })
-
-      await groupsService.disbandCourseGroup(currentGroup.id)
+      setDeleteError('')
+      await groupsService.archiveCourseGroup(currentGroup.id)
       setIsConfirmDisbandOpen(false)
-
+      toast.success(`Archived group "${currentGroup.name}". Historical submissions and grades preserved.`, 'Group Archived')
       if (onGroupUpdated) onGroupUpdated()
       onClose()
     } catch (err) {
-      setModalFeedback({ type: 'error', text: err.message || 'Failed to disband group.' })
+      const msg = err.message || 'Failed to archive group.'
+      setDeleteError(msg)
+      toast.error(msg, 'Archive Failed')
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleConfirmDisbandGroup = async () => {
+    try {
+      setActionLoading(true)
+      setDeleteError('')
+      const res = await groupsService.disbandCourseGroup(currentGroup.id)
+      setIsConfirmDisbandOpen(false)
+      toast.success(
+        res?.message || `Group "${currentGroup.name}" updated.`,
+        res?.action === 'archived' ? 'Group Archived' : 'Group Deleted'
+      )
+      if (onGroupUpdated) onGroupUpdated()
+      onClose()
+    } catch (err) {
+      const msg = err.message || 'Failed to disband group.'
+      setDeleteError(msg)
+      toast.error(msg, 'Delete Failed')
     } finally {
       setActionLoading(false)
     }
@@ -571,16 +621,38 @@ export default function GroupDetailsModal({
                 </Button>
               )}
 
-              {((isLeader && members.length === 1) || isTeacher) && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  icon={Trash2}
-                  onClick={() => setIsConfirmDisbandOpen(true)}
-                  className="text-rose-600 hover:bg-rose-50 cursor-pointer"
-                >
-                  Disband
-                </Button>
+              {isTeacher && (
+                <ActionMenu
+                  label={`Actions for ${currentGroup.name}`}
+                  items={[
+                    {
+                      id: 'edit-group',
+                      label: 'Edit Group',
+                      icon: Edit2,
+                      disabled: currentGroup.status === 'archived',
+                      onClick: () => setIsEditGroupOpen(true),
+                    },
+                    ...(currentGroup.status !== 'archived'
+                      ? [
+                          {
+                            id: 'archive-group',
+                            label: 'Archive Group',
+                            icon: Archive,
+                            variant: 'warning',
+                            onClick: handleArchiveGroup,
+                          },
+                        ]
+                      : []),
+                    {
+                      id: 'delete-group',
+                      label: 'Delete Group',
+                      icon: Trash2,
+                      variant: 'danger',
+                      dividerBefore: true,
+                      onClick: openDeleteDialog,
+                    },
+                  ]}
+                />
               )}
             </div>
           </div>
@@ -1324,43 +1396,49 @@ export default function GroupDetailsModal({
         </div>
       </Modal>
 
-      {/* SUB-MODAL 4: Disband Group Confirmation */}
-      <Modal
-        isOpen={isConfirmDisbandOpen}
-        onClose={() => setIsConfirmDisbandOpen(false)}
-        title="Disband Group"
-        size="sm"
-      >
-        <div className="space-y-4">
-          <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 space-y-1.5">
-            <strong className="block font-bold">Disband {currentGroup.name}?</strong>
-            <p>
-              This will permanently disband the group. If the group has submitted assignments, it will be safely archived to preserve student grades and submission history.
-            </p>
-          </div>
+      {/* SUB-MODAL 3.5: Edit Group Modal (Professor / Admin only) */}
+      <EditGroupModal
+        isOpen={isEditGroupOpen}
+        onClose={() => setIsEditGroupOpen(false)}
+        group={currentGroup}
+        classId={currentGroup?.class_id}
+        currentUser={currentUser}
+        onSuccess={(updated) => {
+          if (updated) setCurrentGroup(updated)
+          if (onGroupUpdated) onGroupUpdated()
+        }}
+      />
 
-          <div className="flex items-center justify-end gap-2 pt-2 border-t border-brand-line">
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={actionLoading}
-              onClick={() => setIsConfirmDisbandOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              loading={actionLoading}
-              icon={Trash2}
-              onClick={handleConfirmDisbandGroup}
-              className="bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
-            >
-              Confirm Disband
-            </Button>
-          </div>
-        </div>
-      </Modal>
+      {/* SUB-MODAL 4: Safe Delete / Archive Group Confirmation */}
+      <ConfirmDeleteModal
+        isOpen={isConfirmDisbandOpen}
+        onClose={() => {
+          setIsConfirmDisbandOpen(false)
+          setDeleteError('')
+        }}
+        entityLabel="Group"
+        entityName={currentGroup?.name || ''}
+        entityMeta={currentGroup?.status === 'archived' ? 'Archived Group' : 'Active Group'}
+        impactLoading={groupImpactLoading}
+        stats={
+          groupImpact
+            ? [
+                { label: 'Members', value: groupImpact.membersCount, highlight: groupImpact.membersCount > 0 },
+                { label: 'Group Subs', value: groupImpact.groupSubmissionsCount, highlight: groupImpact.groupSubmissionsCount > 0 },
+                { label: 'Graded Records', value: groupImpact.gradedCount, highlight: groupImpact.gradedCount > 0 },
+                { label: 'Chat Messages', value: groupImpact.messagesCount },
+              ]
+            : []
+        }
+        canPermanentDelete={Boolean(groupImpact?.canPermanentDelete)}
+        blockReason="This group has historical group submissions or graded records. Permanent deletion is blocked; archive it instead to preserve member and grading history."
+        archiveSupported={currentGroup?.status !== 'archived'}
+        archiveLabel="Archive Group"
+        loading={actionLoading}
+        error={deleteError}
+        onConfirmArchive={handleArchiveGroup}
+        onConfirmDelete={handleConfirmDisbandGroup}
+      />
     </>
   )
 }

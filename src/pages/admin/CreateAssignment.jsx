@@ -23,9 +23,11 @@ import {
   Sparkles,
   Cloud,
   Layers,
-  UserCheck
+  UserCheck,
+  Lock
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
+import { useToast } from '../../context/ToastContext'
 import { classesService } from '../../services/classes.service'
 import { assignmentsService } from '../../services/assignments.service'
 import { notificationsService } from '../../services/notifications.service'
@@ -38,6 +40,7 @@ const StudentSelectionModal = lazy(() => import('../../components/admin/StudentS
 
 export default function CreateAssignment() {
   const { user } = useAuth()
+  const toast = useToast()
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams] = useSearchParams()
@@ -58,6 +61,10 @@ export default function CreateAssignment() {
   const [onedriveLink, setOnedriveLink] = useState('')
   const [requireSubmission, setRequireSubmission] = useState(true)
   const [twoStepSubmission, setTwoStepSubmission] = useState(true)
+  const [existingSubmissionsCount, setExistingSubmissionsCount] = useState(0)
+  const [existingStatus, setExistingStatus] = useState('published')
+
+  const hasExistingSubmissions = Boolean(editAssignmentId && existingSubmissionsCount > 0)
 
   // Link addition dialog states
   const [showAddLink, setShowAddLink] = useState(false)
@@ -81,9 +88,10 @@ export default function CreateAssignment() {
     if (!user?.id) return
     try {
       setInitialLoading(true)
-      const [adminClasses, existing] = await Promise.all([
+      const [adminClasses, existing, impact] = await Promise.all([
         classesService.getAdminClasses(user.id),
         editAssignmentId ? assignmentsService.getAssignmentById(editAssignmentId) : Promise.resolve(null),
+        editAssignmentId ? assignmentsService.getAssignmentImpactSummary(editAssignmentId).catch(() => null) : Promise.resolve(null),
       ])
       setClasses(adminClasses)
 
@@ -105,6 +113,8 @@ export default function CreateAssignment() {
         setOnedriveLink(existing.onedrive_link || '')
         setSubmissionType(existing.submission_type || 'individual')
         setAssignToAll(existing.assign_to_all)
+        setExistingStatus(existing.status || 'published')
+        setExistingSubmissionsCount(impact?.totalSubmissionsCount || 0)
         if (!existing.assign_to_all && existing.assignment_students) {
           setSelectedStudentIds(existing.assignment_students.map((s) => s.student_id))
         }
@@ -188,6 +198,7 @@ export default function CreateAssignment() {
           payload,
           assignToAll ? [] : selectedStudentIds
         )
+        toast.success(`Updated assignment "${title.trim()}".`, 'Assignment Saved')
       } else {
         const createdAssn = await assignmentsService.createAssignment(
           payload,
@@ -203,6 +214,12 @@ export default function CreateAssignment() {
           type: 'assignment',
           referenceId: createdAssn?.id,
         })
+        toast.success(
+          status === 'draft'
+            ? `Saved draft "${title.trim()}".`
+            : `Published assignment "${title.trim()}".`,
+          status === 'draft' ? 'Draft Saved' : 'Assignment Published'
+        )
       }
 
       if (location.state?.from === 'class' || searchParams.get('classId')) {
@@ -212,7 +229,9 @@ export default function CreateAssignment() {
       }
     } catch (err) {
       console.error('[CreateAssignment] Error saving assignment:', err)
-      setErrorMessage(err.message || 'Failed to save assignment. Please try again.')
+      const msg = err.message || 'Failed to save assignment. Please try again.'
+      setErrorMessage(msg)
+      toast.error(msg, 'Save Failed')
     } finally {
       setLoading(false)
     }
@@ -272,6 +291,21 @@ export default function CreateAssignment() {
       {errorMessage && (
         <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs sm:text-sm font-medium">
           {errorMessage}
+        </div>
+      )}
+
+      {hasExistingSubmissions && (
+        <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs sm:text-sm font-medium flex items-start gap-2.5">
+          <Lock className="w-4 h-4 shrink-0 mt-0.5 text-amber-700" />
+          <span>
+            {existingSubmissionsCount} student or group submission(s) have already been recorded. Class selection and Individual/Group submission mode are locked to preserve academic history.
+          </span>
+        </div>
+      )}
+
+      {editAssignmentId && existingStatus === 'archived' && (
+        <div className="p-4 rounded-xl bg-slate-100 border border-slate-200 text-slate-700 text-xs sm:text-sm font-medium">
+          This assignment is currently <span className="font-bold">Archived</span>. Clicking Publish &amp; Update will restore it to active published status.
         </div>
       )}
 
@@ -592,11 +626,12 @@ export default function CreateAssignment() {
               </label>
               <select
                 value={selectedClassId}
+                disabled={hasExistingSubmissions}
                 onChange={(e) => {
                   setSelectedClassId(e.target.value)
                   setSelectedStudentIds([])
                 }}
-                className="w-full rounded-input border border-brand-line bg-white px-3.5 py-2.5 text-sm text-brand-heading font-medium focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20 cursor-pointer"
+                className="w-full rounded-input border border-brand-line bg-white px-3.5 py-2.5 text-sm text-brand-heading font-medium focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/20 cursor-pointer disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
               >
                 {classes.map((cls) => (
                   <option key={cls.id} value={cls.id}>
@@ -684,12 +719,13 @@ export default function CreateAssignment() {
               <div className="grid grid-cols-2 gap-2.5 p-1 bg-slate-100/90 rounded-xl border border-brand-line/60">
                 <button
                   type="button"
+                  disabled={hasExistingSubmissions}
                   onClick={() => setSubmissionType('individual')}
-                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all ${
                     submissionType === 'individual'
                       ? 'bg-white text-brand-primary shadow-xs border border-brand-line/50'
                       : 'text-slate-600 hover:text-brand-heading'
-                  }`}
+                  } ${hasExistingSubmissions ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
                 >
                   <UserCheck className="w-3.5 h-3.5" />
                   <span>Individual</span>
@@ -697,12 +733,13 @@ export default function CreateAssignment() {
 
                 <button
                   type="button"
+                  disabled={hasExistingSubmissions}
                   onClick={() => setSubmissionType('group')}
-                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  className={`flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-semibold transition-all ${
                     submissionType === 'group'
                       ? 'bg-white text-brand-primary shadow-xs border border-brand-line/50'
                       : 'text-slate-600 hover:text-brand-heading'
-                  }`}
+                  } ${hasExistingSubmissions ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}
                 >
                   <Layers className="w-3.5 h-3.5" />
                   <span>Group</span>

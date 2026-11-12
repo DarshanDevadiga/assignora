@@ -14,16 +14,24 @@ import {
   Layers,
   Sparkles,
   ArrowRight,
-  RefreshCw
+  RefreshCw,
+  Edit2,
+  Trash2,
+  Archive,
+  Eye
 } from 'lucide-react'
 import Card from '../common/Card'
 import Button from '../common/Button'
 import Badge from '../common/Badge'
+import ActionMenu from '../common/ActionMenu'
+import ConfirmDeleteModal from '../common/ConfirmDeleteModal'
 import { Input } from '../common/Input'
 import GroupManagementModal from '../group/GroupManagementModal'
 import GroupDetailsModal from '../group/GroupDetailsModal'
+import EditGroupModal from '../group/EditGroupModal'
 import ProfessorCreateGroupModal from '../group/ProfessorCreateGroupModal'
 import { groupsService } from '../../services/groups.service'
+import { useToast } from '../../context/ToastContext'
 
 export default function ClassGroupsTab({
   classId,
@@ -33,12 +41,19 @@ export default function ClassGroupsTab({
   onGroupChanged
 }) {
   const navigate = useNavigate()
+  const toast = useToast()
   const rolePrefix = currentUser?.role === 'admin' ? '/admin' : '/student'
 
   const [groups, setGroups] = useState([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedGroupForDetails, setSelectedGroupForDetails] = useState(null)
+  const [editingGroup, setEditingGroup] = useState(null)
+  const [deleteGroupTarget, setDeleteGroupTarget] = useState(null)
+  const [groupImpact, setGroupImpact] = useState(null)
+  const [groupImpactLoading, setGroupImpactLoading] = useState(false)
+  const [groupDeleteLoading, setGroupDeleteLoading] = useState(false)
+  const [groupDeleteError, setGroupDeleteError] = useState('')
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [isProfessorCreateOpen, setIsProfessorCreateOpen] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
@@ -172,6 +187,62 @@ export default function ClassGroupsTab({
   const handleGroupUpdated = async () => {
     await loadData()
     if (onGroupChanged) onGroupChanged()
+  }
+
+  const openDeleteGroupDialog = async (grp) => {
+    setDeleteGroupTarget(grp)
+    setGroupDeleteError('')
+    setGroupImpact(null)
+    setGroupImpactLoading(true)
+    try {
+      const impact = await groupsService.getGroupImpactSummary(grp.id)
+      setGroupImpact(impact)
+    } catch (err) {
+      setGroupDeleteError(err.message || 'Failed to inspect group submission history.')
+    } finally {
+      setGroupImpactLoading(false)
+    }
+  }
+
+  const handleArchiveGroup = async (targetGroup) => {
+    const grp = targetGroup || deleteGroupTarget
+    if (!grp?.id) return
+    try {
+      setGroupDeleteLoading(true)
+      setGroupDeleteError('')
+      await groupsService.archiveCourseGroup(grp.id)
+      setDeleteGroupTarget(null)
+      toast.success(`Archived group "${grp.name}". Memberships and historical submissions remain preserved.`, 'Group Archived')
+      await handleGroupUpdated()
+    } catch (err) {
+      const msg = err.message || 'Failed to archive group.'
+      setGroupDeleteError(msg)
+      toast.error(msg, 'Archive Failed')
+    } finally {
+      setGroupDeleteLoading(false)
+    }
+  }
+
+  const handleConfirmDeleteGroup = async () => {
+    if (!deleteGroupTarget?.id) return
+    try {
+      setGroupDeleteLoading(true)
+      setGroupDeleteError('')
+      const res = await groupsService.disbandCourseGroup(deleteGroupTarget.id)
+      const gName = deleteGroupTarget.name
+      setDeleteGroupTarget(null)
+      toast.success(
+        res?.message || `Deleted empty group "${gName}" successfully.`,
+        res?.action === 'archived' ? 'Group Archived' : 'Group Deleted'
+      )
+      await handleGroupUpdated()
+    } catch (err) {
+      const msg = err.message || 'Unable to delete group.'
+      setGroupDeleteError(msg)
+      toast.error(msg, 'Action Failed')
+    } finally {
+      setGroupDeleteLoading(false)
+    }
   }
 
   return (
@@ -416,16 +487,58 @@ export default function ClassGroupsTab({
                       </div>
                     </div>
 
-                    <div className="shrink-0 flex flex-col items-end gap-1">
-                      {isArchived && (
-                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300">
-                          Archived
-                        </span>
-                      )}
-                      {isMyGroup && (
-                        <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300/50">
-                          Your Group
-                        </span>
+                    <div className="shrink-0 flex items-center gap-1.5">
+                      <div className="flex flex-col items-end gap-1">
+                        {isArchived && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300">
+                            Archived
+                          </span>
+                        )}
+                        {isMyGroup && (
+                          <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300/50">
+                            Your Group
+                          </span>
+                        )}
+                      </div>
+
+                      {isTeacher && (
+                        <ActionMenu
+                          label={`Actions for group ${g.name}`}
+                          items={[
+                            {
+                              id: 'view',
+                              label: 'View Group',
+                              icon: Eye,
+                              onClick: () => handleOpenGroupDetails(g.id),
+                            },
+                            {
+                              id: 'edit',
+                              label: 'Edit Group',
+                              icon: Edit2,
+                              disabled: isArchived,
+                              onClick: () => setEditingGroup(g),
+                            },
+                            ...(!isArchived
+                              ? [
+                                  {
+                                    id: 'archive',
+                                    label: 'Archive Group',
+                                    icon: Archive,
+                                    variant: 'warning',
+                                    onClick: () => handleArchiveGroup(g),
+                                  },
+                                ]
+                              : []),
+                            {
+                              id: 'delete',
+                              label: 'Delete Group',
+                              icon: Trash2,
+                              variant: 'danger',
+                              dividerBefore: true,
+                              onClick: () => openDeleteGroupDialog(g),
+                            },
+                          ]}
+                        />
                       )}
                     </div>
                   </div>
@@ -544,6 +657,48 @@ export default function ClassGroupsTab({
         classId={classId}
         className={className}
         onGroupCreated={handleGroupUpdated}
+      />
+
+      {/* Edit Group Modal (Admin / Professor Only) */}
+      <EditGroupModal
+        isOpen={Boolean(editingGroup)}
+        onClose={() => setEditingGroup(null)}
+        group={editingGroup}
+        classId={classId}
+        currentUser={currentUser}
+        onSuccess={() => handleGroupUpdated()}
+      />
+
+      {/* Safe Delete / Archive Group Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(deleteGroupTarget)}
+        onClose={() => {
+          setDeleteGroupTarget(null)
+          setGroupDeleteError('')
+        }}
+        entityLabel="Group"
+        entityName={deleteGroupTarget?.name || ''}
+        entityMeta={deleteGroupTarget?.status === 'archived' ? 'Archived Group' : 'Active Group'}
+        impactLoading={groupImpactLoading}
+        stats={
+          groupImpact
+            ? [
+                { label: 'Members', value: groupImpact.membersCount, highlight: groupImpact.membersCount > 0 },
+                { label: 'Group Subs', value: groupImpact.groupSubmissionsCount, highlight: groupImpact.groupSubmissionsCount > 0 },
+                { label: 'Graded Records', value: groupImpact.gradedCount, highlight: groupImpact.gradedCount > 0 },
+                { label: 'Chat Messages', value: groupImpact.messagesCount },
+              ]
+            : []
+        }
+        canPermanentDelete={Boolean(groupImpact?.canPermanentDelete)}
+        blockReason="This group has historical group submissions or graded records. Permanent deletion is blocked; archive the group instead to keep member and grading history intact."
+        archiveSupported={deleteGroupTarget?.status !== 'archived'}
+        archiveLabel="Archive Group"
+        archiveHelperText="Archiving marks the group inactive while preserving all members, leadership history, group submissions, and marks."
+        loading={groupDeleteLoading}
+        error={groupDeleteError}
+        onConfirmArchive={() => handleArchiveGroup(deleteGroupTarget)}
+        onConfirmDelete={handleConfirmDeleteGroup}
       />
     </div>
   )

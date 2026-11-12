@@ -306,50 +306,247 @@ export const classesService = {
   },
 
   /**
-   * Update an existing class
+   * Inspect associated students, assignments, groups, submissions, and grades before delete/archive
+   */
+  async getClassImpactSummary(classId) {
+    if (!classId) {
+      throw new Error('Class ID is required to inspect impact.')
+    }
+
+    const [membersRes, assignmentsRes, groupsRes, announcementsRes] = await Promise.all([
+      supabase
+        .from('class_members')
+        .select('id, student_id', { count: 'exact', head: true })
+        .eq('class_id', classId),
+      supabase
+        .from('assignments')
+        .select('id, status, submission_type')
+        .eq('class_id', classId),
+      supabase
+        .from('groups')
+        .select('id, status')
+        .eq('class_id', classId),
+      supabase
+        .from('announcements')
+        .select('id', { count: 'exact', head: true })
+        .eq('class_id', classId),
+    ])
+
+    const assignmentRows = assignmentsRes.data || []
+    const assignmentIds = assignmentRows.map((a) => a.id)
+    const groupRows = groupsRes.data || []
+
+    let individualSubmissionsCount = 0
+    let gradedIndividualCount = 0
+    let groupSubmissionsCount = 0
+    let gradedGroupCount = 0
+
+    if (assignmentIds.length > 0) {
+      const [indRes, grpSubRes] = await Promise.all([
+        supabase
+          .from('submissions')
+          .select('id, status, comment')
+          .in('assignment_id', assignmentIds),
+        supabase
+          .from('group_submissions')
+          .select('id, status, marks')
+          .in('assignment_id', assignmentIds),
+      ])
+
+      const indRows = indRes.data || []
+      individualSubmissionsCount = indRows.length
+      gradedIndividualCount = indRows.filter((row) => {
+        if (row.status === 'reviewed') return true
+        try {
+          if (row.comment && String(row.comment).trim().startsWith('{')) {
+            const parsed = JSON.parse(row.comment)
+            return parsed.grade !== null && parsed.grade !== undefined
+          }
+        } catch {
+          // ignore malformed comment JSON
+        }
+        return false
+      }).length
+
+      const grpSubRows = grpSubRes.data || []
+      groupSubmissionsCount = grpSubRows.length
+      gradedGroupCount = grpSubRows.filter(
+        (row) => row.status === 'reviewed' || (row.marks !== null && row.marks !== undefined)
+      ).length
+    }
+
+    const studentsCount = membersRes.count || 0
+    const assignmentsCount = assignmentRows.length
+    const groupsCount = groupRows.length
+    const announcementsCount = announcementsRes.count || 0
+    const totalSubmissionsCount = individualSubmissionsCount + groupSubmissionsCount
+    const totalGradedCount = gradedIndividualCount + gradedGroupCount
+    const hasProtectedRecords =
+      studentsCount > 0 ||
+      assignmentsCount > 0 ||
+      groupsCount > 0 ||
+      totalSubmissionsCount > 0 ||
+      totalGradedCount > 0
+
+    return {
+      studentsCount,
+      assignmentsCount,
+      groupsCount,
+      announcementsCount,
+      individualSubmissionsCount,
+      groupSubmissionsCount,
+      totalSubmissionsCount,
+      gradedIndividualCount,
+      gradedGroupCount,
+      totalGradedCount,
+      hasProtectedRecords,
+      canPermanentDelete: !hasProtectedRecords,
+    }
+  },
+
+  /**
+   * Update an existing class with validation and schema-adaptive optional metadata
    */
   async updateClass(classId, updates) {
-    const { data, error } = await supabase
+    if (!classId) throw new Error('Class ID is required.')
+
+    const trimmedName = (updates.name || '').trim()
+    const trimmedSubject = (updates.subject || '').trim()
+    const trimmedDesc = (updates.description || '').trim()
+    const normalizedCode = updates.class_code !== undefined
+      ? String(updates.class_code || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '')
+      : undefined
+
+    if (trimmedName.length < 2) {
+      throw new Error('Class name must be at least 2 characters.')
+    }
+    if (!trimmedSubject) {
+      throw new Error('Subject / Course Code is required.')
+    }
+    if (normalizedCode !== undefined && normalizedCode.length < 4) {
+      throw new Error('Enrollment code must be at least 4 alphanumeric characters.')
+    }
+
+    const basePayload = {
+      name: trimmedName,
+      subject: trimmedSubject,
+      description: trimmedDesc,
+    }
+
+    if (normalizedCode !== undefined) {
+      basePayload.class_code = normalizedCode
+    }
+
+    const extendedPayload = { ...basePayload }
+    let hasExtendedFields = false
+    if (updates.semester !== undefined) {
+      extendedPayload.semester = (updates.semester || '').trim() || null
+      hasExtendedFields = true
+    }
+    if (updates.academic_year !== undefined) {
+      extendedPayload.academic_year = (updates.academic_year || '').trim() || null
+      hasExtendedFields = true
+    }
+
+    let { data, error } = await supabase
       .from('classes')
-      .update({
-        name: updates.name.trim(),
-        subject: updates.subject?.trim() || '',
-        description: updates.description?.trim() || '',
-      })
+      .update(hasExtendedFields ? extendedPayload : basePayload)
       .eq('id', classId)
       .select()
       .single()
 
-    if (error) {
-      console.error('[classesService] Error updating class:', error)
-      throw error
+    if (
+      error &&
+      hasExtendedFields &&
+      (error.code === 'PGRST204' ||
+        error.message?.includes('semester') ||
+        error.message?.includes('academic_year'))
+    ) {
+      console.warn('[classesService] Retrying updateClass without optional semester/academic_year:', error.message)
+      const fallbackRes = await supabase
+        .from('classes')
+        .update(basePayload)
+        .eq('id', classId)
+        .select()
+        .single()
+      data = fallbackRes.data
+      error = fallbackRes.error
     }
+
+    if (error) {
+      if (error.code === '23505' || error.message?.toLowerCase().includes('class_code')) {
+        throw new Error('This enrollment code is already in use by another class.')
+      }
+      if (error.code === 'PGRST116') {
+        throw new Error('You do not have permission to edit this class, or it no longer exists.')
+      }
+      console.error('[classesService] Error updating class:', error)
+      throw new Error(error.message || 'Failed to update class.')
+    }
+
     invalidateClassMutationCaches(classId)
     return data
   },
 
   /**
-   * Delete a class and related members
+   * Archive or restore a class when the optional status column / RPC exists
+   */
+  async archiveClass(classId) {
+    if (!classId) throw new Error('Class ID is required.')
+
+    const { data, error } = await supabase.rpc('archive_class', { p_class_id: classId })
+    if (error) {
+      if (error.code === 'PGRST202' || error.code === '42883' || error.message?.includes('archive_class')) {
+        throw new Error(
+          'Class archiving requires the staged Round 2 management SQL migration to be approved and run on Supabase.'
+        )
+      }
+      throw new Error(error.message || 'Failed to archive class.')
+    }
+
+    if (data && data.success === false) {
+      throw new Error(data.error || 'Failed to archive class.')
+    }
+
+    invalidateClassMutationCaches(classId)
+    return data
+  },
+
+  /**
+   * Safely delete an EMPTY class. Refuses deletion if students, assignments,
+   * groups, submissions, or grades exist so historical Round 1 / Round 2 data is never destroyed.
    */
   async deleteClass(classId) {
-    // 1. Delete class members
-    await supabase.from('class_members').delete().eq('class_id', classId)
-    // 2. Delete class announcements
-    await supabase.from('announcements').delete().eq('class_id', classId)
-    // 3. Delete assignments associated with this class
-    const { data: assignments } = await supabase.from('assignments').select('id').eq('class_id', classId)
-    if (assignments?.length) {
-      const assignmentIds = assignments.map((a) => a.id)
-      await supabase.from('assignment_students').delete().in('assignment_id', assignmentIds)
-      await supabase.from('submissions').delete().in('assignment_id', assignmentIds)
-      await supabase.from('assignments').delete().eq('class_id', classId)
+    if (!classId) throw new Error('Class ID is required.')
+
+    const impact = await this.getClassImpactSummary(classId)
+    if (!impact.canPermanentDelete) {
+      throw new Error(
+        `Cannot delete class while protected records exist (${impact.studentsCount} students, ${impact.assignmentsCount} assignments, ${impact.groupsCount} groups, ${impact.totalSubmissionsCount} submissions). Genuine historical submissions, grades, and memberships must be preserved.`
+      )
     }
-    // 4. Delete the class itself
-    const { error } = await supabase.from('classes').delete().eq('id', classId)
+
+    // Only empty announcement notices (if any) can be cleared when class has zero academic records
+    if (impact.announcementsCount > 0) {
+      const { error: annError } = await supabase
+        .from('announcements')
+        .delete()
+        .eq('class_id', classId)
+      if (annError) {
+        throw new Error(annError.message || 'Unable to clear class announcements before deletion.')
+      }
+    }
+
+    const { error } = await supabase
+      .from('classes')
+      .delete()
+      .eq('id', classId)
+
     if (error) {
       console.error('[classesService] Error deleting class:', error)
-      throw error
+      throw new Error(error.message || 'Failed to delete class.')
     }
+
     invalidateClassMutationCaches(classId)
     return true
   },

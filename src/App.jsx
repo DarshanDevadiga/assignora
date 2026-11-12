@@ -2,6 +2,7 @@ import React from 'react'
 import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { NotificationProvider } from './context/NotificationContext'
+import { ToastProvider } from './context/ToastContext'
 import AppRoutes from './routes/AppRoutes'
 import ErrorBoundary from './components/common/ErrorBoundary'
 
@@ -22,9 +23,11 @@ export default function App() {
     <ErrorBoundary>
       <BrowserRouter>
         <AuthProvider>
-          <NotificationProvider>
-            <MainApp />
-          </NotificationProvider>
+          <ToastProvider>
+            <NotificationProvider>
+              <MainApp />
+            </NotificationProvider>
+          </ToastProvider>
         </AuthProvider>
       </BrowserRouter>
     </ErrorBoundary>

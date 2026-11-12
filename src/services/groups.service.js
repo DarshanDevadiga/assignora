@@ -494,7 +494,150 @@ export const groupsService = {
   },
 
   /**
-   * Disband or archive a course group
+   * Inspect group members, historical group submissions, graded records, and chat messages
+   */
+  async getGroupImpactSummary(groupId) {
+    if (!groupId) throw new Error('Group ID is required.')
+
+    const [group, subsRes, msgRes] = await Promise.all([
+      this.getGroupById(groupId),
+      supabase
+        .from('group_submissions')
+        .select('id, status, marks')
+        .eq('group_id', groupId),
+      supabase
+        .from('class_messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('channel_type', 'group')
+        .eq('group_id', groupId),
+    ])
+
+    const subRows = subsRes.data || []
+    const groupSubmissionsCount = subRows.length
+    const gradedCount = subRows.filter(
+      (r) => r.status === 'reviewed' || (r.marks !== null && r.marks !== undefined)
+    ).length
+    const membersCount = group?.members?.length || 0
+    const messagesCount = msgRes.count || 0
+    const hasHistory = groupSubmissionsCount > 0 || gradedCount > 0 || messagesCount > 0
+
+    return {
+      group,
+      status: group?.status || 'active',
+      membersCount,
+      groupSubmissionsCount,
+      gradedCount,
+      messagesCount,
+      hasHistory,
+      canPermanentDelete: groupSubmissionsCount === 0 && gradedCount === 0,
+    }
+  },
+
+  /**
+   * Authorized Instructor/Admin update for Group Name and/or Group Leader.
+   * Respects database column privileges (`UPDATE (name)` + `transfer_group_leadership` RPC).
+   */
+  async updateGroupDetails(groupId, { name, leaderId }) {
+    if (!groupId) throw new Error('Group ID is required.')
+
+    const existing = await this.getGroupById(groupId)
+    if (!existing) {
+      throw new Error('Group not found or no longer accessible.')
+    }
+
+    const trimmedName = (name || '').trim()
+    if (trimmedName.length < 2) {
+      throw new Error('Group name must be at least 2 characters.')
+    }
+
+    if (trimmedName !== existing.name) {
+      const { error: nameError } = await supabase
+        .from('groups')
+        .update({ name: trimmedName })
+        .eq('id', groupId)
+        .select('id, name')
+        .single()
+
+      if (nameError) {
+        if (nameError.code === '23505') {
+          throw new Error('A group with this name already exists in this class.')
+        }
+        if (nameError.code === 'PGRST116') {
+          throw new Error('You do not have permission to rename this group.')
+        }
+        throw new Error(nameError.message || 'Failed to update group name.')
+      }
+    }
+
+    if (leaderId && leaderId !== existing.leader_id) {
+      await this.transferGroupLeadership(groupId, leaderId)
+    }
+
+    invalidateGroupCache({ classId: existing.class_id, groupId })
+    groupCache.clear()
+    return await this.getGroupById(groupId)
+  },
+
+  /**
+   * Archive a course group directly (preserves members, submissions, grades, and chat history)
+   */
+  async archiveCourseGroup(groupId) {
+    if (!groupId) throw new Error('Group ID is required.')
+
+    const { data, error } = await supabase.rpc('archive_course_group', {
+      p_group_id: groupId,
+    })
+
+    if (error) {
+      throw new Error(error.message || 'Failed to archive group.')
+    }
+
+    if (data && !data.success) {
+      throw new Error(data.error || 'Failed to archive group.')
+    }
+
+    invalidateGroupCache({ groupId })
+    groupCache.clear()
+    return data
+  },
+
+  /**
+   * Instructor/Admin removes a non-leader member from an active group without removing from class_members.
+   */
+  async removeGroupMember(groupId, studentId) {
+    if (!groupId || !studentId) {
+      throw new Error('Group ID and Student ID are required.')
+    }
+
+    const { data, error } = await supabase.rpc('professor_remove_group_member', {
+      p_group_id: groupId,
+      p_student_id: studentId,
+    })
+
+    if (error) {
+      if (
+        error.code === 'PGRST202' ||
+        error.code === '42883' ||
+        error.message?.includes('professor_remove_group_member')
+      ) {
+        throw new Error(
+          'Instructor member removal requires the staged Round 2 management SQL migration to be approved and executed on Supabase.'
+        )
+      }
+      throw new Error(error.message || 'Failed to remove group member.')
+    }
+
+    if (data && !data.success) {
+      throw new Error(data.error || 'Failed to remove group member.')
+    }
+
+    invalidateGroupCache({ groupId, studentId })
+    groupCache.clear()
+    return data
+  },
+
+  /**
+   * Disband or archive a course group (Instructor/Admin action; DB automatically archives if submissions exist)
    */
   async disbandCourseGroup(groupId) {
     if (!groupId) throw new Error('Group ID is required.')

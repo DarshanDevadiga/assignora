@@ -253,21 +253,115 @@ export const assignmentsService = {
   },
 
   /**
-   * Update an assignment and update student allocations if specified
+   * Inspect submission, group acknowledgement, and grade impact before editing or deleting an assignment
+   */
+  async getAssignmentImpactSummary(assignmentId) {
+    if (!assignmentId) {
+      throw new Error('Assignment ID is required.')
+    }
+
+    const [assignmentRes, indRes, grpRes, allocRes] = await Promise.all([
+      supabase
+        .from('assignments')
+        .select('id, title, class_id, submission_type, status, assign_to_all')
+        .eq('id', assignmentId)
+        .maybeSingle(),
+      supabase
+        .from('submissions')
+        .select('id, student_id, status, comment')
+        .eq('assignment_id', assignmentId),
+      supabase
+        .from('group_submissions')
+        .select('id, group_id, status, marks')
+        .eq('assignment_id', assignmentId),
+      supabase
+        .from('assignment_students')
+        .select('student_id')
+        .eq('assignment_id', assignmentId),
+    ])
+
+    const indRows = indRes.data || []
+    const grpRows = grpRes.data || []
+
+    const gradedIndividualCount = indRows.filter((row) => {
+      if (row.status === 'reviewed') return true
+      try {
+        if (row.comment && String(row.comment).trim().startsWith('{')) {
+          const parsed = JSON.parse(row.comment)
+          return parsed.grade !== null && parsed.grade !== undefined
+        }
+      } catch {
+        // ignore invalid json
+      }
+      return false
+    }).length
+
+    const gradedGroupCount = grpRows.filter(
+      (row) => row.status === 'reviewed' || (row.marks !== null && row.marks !== undefined)
+    ).length
+
+    const individualSubmissionsCount = indRows.length
+    const groupSubmissionsCount = grpRows.length
+    const totalSubmissionsCount = individualSubmissionsCount + groupSubmissionsCount
+    const totalGradedCount = gradedIndividualCount + gradedGroupCount
+    const submittedStudentIds = indRows.map((r) => r.student_id).filter(Boolean)
+
+    return {
+      assignment: assignmentRes.data || null,
+      individualSubmissionsCount,
+      groupSubmissionsCount,
+      totalSubmissionsCount,
+      gradedIndividualCount,
+      gradedGroupCount,
+      totalGradedCount,
+      allocatedStudentsCount: (allocRes.data || []).length,
+      submittedStudentIds,
+      hasSubmissions: totalSubmissionsCount > 0,
+      canPermanentDelete: totalSubmissionsCount === 0,
+    }
+  },
+
+  /**
+   * Update an assignment safely and update student allocations without orphaning submitted students
    */
   async updateAssignment(assignmentId, updates, selectedStudentIds = null) {
+    if (!assignmentId) throw new Error('Assignment ID is required.')
+
+    const impact = await this.getAssignmentImpactSummary(assignmentId)
+    const existing = impact.assignment
+
+    if (impact.hasSubmissions && existing) {
+      if (updates.class_id && existing.class_id && updates.class_id !== existing.class_id) {
+        throw new Error(
+          'Cannot move an assignment to a different class after submissions or acknowledgements have been recorded.'
+        )
+      }
+      if (
+        updates.submission_type &&
+        existing.submission_type &&
+        updates.submission_type !== existing.submission_type
+      ) {
+        throw new Error(
+          'Cannot change submission type between Individual and Group after submissions or acknowledgements exist.'
+        )
+      }
+    }
+
     const updatePayload = {
       title: updates.title.trim(),
       description: updates.description?.trim() || '',
-      class_id: updates.class_id,
+      class_id: existing && impact.hasSubmissions ? existing.class_id : updates.class_id,
       due_date: updates.due_date,
       due_time: updates.due_time || '23:59:00',
       drive_link: updates.drive_link?.trim() || null,
       onedrive_link: updates.onedrive_link?.trim() || null,
-      submission_type: updates.submission_type || 'individual',
+      submission_type:
+        existing && impact.hasSubmissions
+          ? existing.submission_type || 'individual'
+          : updates.submission_type || 'individual',
       points: Number(updates.points) || 100,
       assign_to_all: updates.assign_to_all ?? true,
-      status: updates.status || 'published',
+      status: updates.status || existing?.status || 'published',
       updated_at: new Date().toISOString(),
     }
 
@@ -301,18 +395,35 @@ export const assignmentsService = {
 
     if (error) {
       console.error('[assignmentsService] Error updating assignment:', error)
-      throw error
+      throw new Error(error.message || 'Failed to update assignment.')
     }
 
-    // If selectedStudentIds array is passed, update assignment_students table
+    // Update assignment_students safely without removing students who already submitted
     if (selectedStudentIds !== null) {
-      await supabase.from('assignment_students').delete().eq('assignment_id', assignmentId)
-      if (!updates.assign_to_all && selectedStudentIds.length > 0) {
-        const studentRows = selectedStudentIds.map((sId) => ({
+      const mergedIds = !updates.assign_to_all
+        ? Array.from(new Set([...(selectedStudentIds || []), ...(impact.submittedStudentIds || [])]))
+        : []
+
+      const { error: delAllocErr } = await supabase
+        .from('assignment_students')
+        .delete()
+        .eq('assignment_id', assignmentId)
+
+      if (delAllocErr) {
+        throw new Error(delAllocErr.message || 'Failed to update student eligibility list.')
+      }
+
+      if (!updates.assign_to_all && mergedIds.length > 0) {
+        const studentRows = mergedIds.map((sId) => ({
           assignment_id: assignmentId,
           student_id: sId,
         }))
-        await supabase.from('assignment_students').insert(studentRows)
+        const { error: insAllocErr } = await supabase
+          .from('assignment_students')
+          .insert(studentRows)
+        if (insAllocErr) {
+          throw new Error(insAllocErr.message || 'Failed to save student eligibility list.')
+        }
       }
     }
 
@@ -321,16 +432,88 @@ export const assignmentsService = {
   },
 
   /**
-   * Delete an assignment and related records
+   * Archive an assignment (preserves all individual & group submissions, marks, and feedback)
+   */
+  async archiveAssignment(assignmentId) {
+    if (!assignmentId) throw new Error('Assignment ID is required.')
+
+    const { data, error } = await supabase
+      .from('assignments')
+      .update({
+        status: 'archived',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', assignmentId)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('[assignmentsService] Error archiving assignment:', error)
+      throw new Error(error.message || 'Failed to archive assignment.')
+    }
+
+    invalidateAssignmentMutationCaches(assignmentId)
+    return data
+  },
+
+  /**
+   * Restore an archived assignment back to published status
+   */
+  async restoreAssignment(assignmentId) {
+    if (!assignmentId) throw new Error('Assignment ID is required.')
+
+    const { data, error } = await supabase
+      .from('assignments')
+      .update({
+        status: 'published',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', assignmentId)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('[assignmentsService] Error restoring assignment:', error)
+      throw new Error(error.message || 'Failed to restore assignment.')
+    }
+
+    invalidateAssignmentMutationCaches(assignmentId)
+    return data
+  },
+
+  /**
+   * Safely delete an assignment ONLY when zero submissions, acknowledgements, or grades exist.
+   * Refuses deletion and never wipes submissions/group_submissions when student work exists.
    */
   async deleteAssignment(assignmentId) {
-    await supabase.from('assignment_students').delete().eq('assignment_id', assignmentId)
-    await supabase.from('submissions').delete().eq('assignment_id', assignmentId)
-    const { error } = await supabase.from('assignments').delete().eq('id', assignmentId)
+    if (!assignmentId) throw new Error('Assignment ID is required.')
+
+    const impact = await this.getAssignmentImpactSummary(assignmentId)
+    if (!impact.canPermanentDelete) {
+      throw new Error(
+        `Cannot permanently delete this assignment because ${impact.totalSubmissionsCount} submission(s) and ${impact.totalGradedCount} graded record(s) exist. Archive it instead to preserve student work and marks.`
+      )
+    }
+
+    const { error: allocError } = await supabase
+      .from('assignment_students')
+      .delete()
+      .eq('assignment_id', assignmentId)
+
+    if (allocError) {
+      throw new Error(allocError.message || 'Failed to clear assignment eligibility allocations.')
+    }
+
+    const { error } = await supabase
+      .from('assignments')
+      .delete()
+      .eq('id', assignmentId)
+
     if (error) {
       console.error('[assignmentsService] Error deleting assignment:', error)
-      throw error
+      throw new Error(error.message || 'Failed to delete assignment.')
     }
+
     invalidateAssignmentMutationCaches(assignmentId)
     return true
   },

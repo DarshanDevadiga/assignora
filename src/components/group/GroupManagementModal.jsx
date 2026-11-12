@@ -398,9 +398,20 @@ export default function GroupManagementModal({
                 </div>
               )}
 
-              {/* Actions: Leave / Disband & Done */}
+              {/* Actions: Leave (Students) / Manage & Done */}
               <div className="flex items-center justify-between pt-3 border-t border-brand-line/60">
-                {isLeader ? (
+                {!isLeader && !isTeacher ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleLeaveGroup}
+                    loading={actionLoading}
+                    className="text-rose-600 hover:text-rose-700 hover:bg-rose-50"
+                    icon={LogOut}
+                  >
+                    Leave Group
+                  </Button>
+                ) : isTeacher ? (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -412,16 +423,9 @@ export default function GroupManagementModal({
                     Disband / Archive Group
                   </Button>
                 ) : (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleLeaveGroup}
-                    loading={actionLoading}
-                    className="text-rose-600 hover:text-rose-700 hover:bg-rose-50"
-                    icon={LogOut}
-                  >
-                    Leave Group
-                  </Button>
+                  <span className="text-[11px] text-brand-muted">
+                    Transfer leadership to leave this group.
+                  </span>
                 )}
 
                 <Button variant="primary" size="sm" onClick={onClose}>

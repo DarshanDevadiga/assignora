@@ -18,9 +18,14 @@ import {
   ChevronDown,
   Layers,
   Cloud,
-  Crown
+  Crown,
+  Edit2,
+  Trash2,
+  Archive,
+  RotateCcw
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
+import { useToast } from '../../context/ToastContext'
 import { assignmentsService } from '../../services/assignments.service'
 import { submissionsService } from '../../services/submissions.service'
 import { groupsService } from '../../services/groups.service'
@@ -41,6 +46,8 @@ import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
 import ProgressBar from '../../components/common/ProgressBar'
 import Modal from '../../components/common/Modal'
+import ActionMenu from '../../components/common/ActionMenu'
+import ConfirmDeleteModal from '../../components/common/ConfirmDeleteModal'
 import { Input, Textarea } from '../../components/common/Input'
 import SubmittedWorkViewerModal from '../../components/submission/SubmittedWorkViewerModal'
 import GroupSubmissionCard from '../../components/submission/GroupSubmissionCard'
@@ -50,7 +57,14 @@ export default function SubmissionTracking() {
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
   const { user } = useAuth()
+  const toast = useToast()
   const navigate = useNavigate()
+
+  const [deleteAssignmentOpen, setDeleteAssignmentOpen] = useState(false)
+  const [assignmentImpact, setAssignmentImpact] = useState(null)
+  const [impactLoading, setImpactLoading] = useState(false)
+  const [manageLoading, setManageLoading] = useState(false)
+  const [manageError, setManageError] = useState('')
 
   const [assignments, setAssignments] = useState([])
   const [selectedAssignmentId, setSelectedAssignmentId] = useState(
@@ -520,6 +534,73 @@ export default function SubmissionTracking() {
       })
   }, [studentRows, statusFilter, searchQuery, sortOrder])
 
+  const openDeleteCurrentAssignment = async () => {
+    if (!currentAssignment?.id) return
+    setDeleteAssignmentOpen(true)
+    setManageError('')
+    setAssignmentImpact(null)
+    setImpactLoading(true)
+    try {
+      const impact = await assignmentsService.getAssignmentImpactSummary(currentAssignment.id)
+      setAssignmentImpact(impact)
+    } catch (err) {
+      setManageError(err.message || 'Failed to inspect assignment submission impact.')
+    } finally {
+      setImpactLoading(false)
+    }
+  }
+
+  const handleArchiveCurrentAssignment = async () => {
+    if (!currentAssignment?.id) return
+    try {
+      setManageLoading(true)
+      setManageError('')
+      await assignmentsService.archiveAssignment(currentAssignment.id)
+      setDeleteAssignmentOpen(false)
+      toast.success(
+        `Archived "${currentAssignment.title}". Submissions and grades remain preserved.`,
+        'Assignment Archived'
+      )
+      await loadAssignmentDetails(currentAssignment.id)
+    } catch (err) {
+      const msg = err.message || 'Failed to archive assignment.'
+      setManageError(msg)
+      toast.error(msg, 'Archive Failed')
+    } finally {
+      setManageLoading(false)
+    }
+  }
+
+  const handleRestoreCurrentAssignment = async () => {
+    if (!currentAssignment?.id) return
+    try {
+      await assignmentsService.restoreAssignment(currentAssignment.id)
+      toast.success(`Restored "${currentAssignment.title}" to published status.`, 'Assignment Restored')
+      await loadAssignmentDetails(currentAssignment.id)
+    } catch (err) {
+      toast.error(err.message || 'Failed to restore assignment.')
+    }
+  }
+
+  const handleConfirmDeleteCurrentAssignment = async () => {
+    if (!currentAssignment?.id) return
+    try {
+      setManageLoading(true)
+      setManageError('')
+      await assignmentsService.deleteAssignment(currentAssignment.id)
+      const title = currentAssignment.title
+      setDeleteAssignmentOpen(false)
+      toast.success(`Deleted assignment "${title}".`, 'Assignment Deleted')
+      navigate(backNavigation.path)
+    } catch (err) {
+      const msg = err.message || 'Unable to delete assignment.'
+      setManageError(msg)
+      toast.error(msg, 'Delete Blocked')
+    } finally {
+      setManageLoading(false)
+    }
+  }
+
   // Open Teacher Grading Modal
   const openGradingModal = (row) => {
     setInspectedStudent(row)
@@ -856,6 +937,44 @@ export default function SubmissionTracking() {
                     <Cloud className="w-3.5 h-3.5 text-blue-600" />
                     <span>OneDrive</span>
                   </a>
+                )}
+                {user?.role === 'admin' && currentAssignment.admin_id === user?.id && (
+                  <ActionMenu
+                    label={`Manage ${currentAssignment.title}`}
+                    items={[
+                      {
+                        id: 'edit',
+                        label: 'Edit Assignment',
+                        icon: Edit2,
+                        onClick: () =>
+                          navigate(`/admin/assignments/${currentAssignment.id}/edit`, {
+                            state: { from: 'assignments', classId: currentAssignment.class_id },
+                          }),
+                      },
+                      currentAssignment.status === 'archived'
+                        ? {
+                            id: 'restore',
+                            label: 'Restore Assignment',
+                            icon: RotateCcw,
+                            onClick: () => handleRestoreCurrentAssignment(),
+                          }
+                        : {
+                            id: 'archive',
+                            label: 'Archive Assignment',
+                            icon: Archive,
+                            variant: 'warning',
+                            onClick: () => handleArchiveCurrentAssignment(),
+                          },
+                      {
+                        id: 'delete',
+                        label: 'Delete Assignment',
+                        icon: Trash2,
+                        variant: 'danger',
+                        dividerBefore: true,
+                        onClick: () => openDeleteCurrentAssignment(),
+                      },
+                    ]}
+                  />
                 )}
               </div>
             </div>
@@ -1938,6 +2057,52 @@ export default function SubmissionTracking() {
             openGradingModal(target)
           }
         }}
+      />
+
+      {/* Safe Delete / Archive Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={deleteAssignmentOpen}
+        onClose={() => {
+          setDeleteAssignmentOpen(false)
+          setManageError('')
+        }}
+        entityLabel="Assignment"
+        entityName={currentAssignment?.title || ''}
+        entityMeta={
+          currentAssignment?.submission_type === 'group'
+            ? 'Group Assignment'
+            : 'Individual Assignment'
+        }
+        impactLoading={impactLoading}
+        stats={
+          assignmentImpact
+            ? [
+                {
+                  label: 'Individual Subs',
+                  value: assignmentImpact.individualSubmissionsCount,
+                  highlight: assignmentImpact.individualSubmissionsCount > 0,
+                },
+                {
+                  label: 'Group Subs',
+                  value: assignmentImpact.groupSubmissionsCount,
+                  highlight: assignmentImpact.groupSubmissionsCount > 0,
+                },
+                {
+                  label: 'Graded Records',
+                  value: assignmentImpact.totalGradedCount,
+                  highlight: assignmentImpact.totalGradedCount > 0,
+                },
+              ]
+            : []
+        }
+        canPermanentDelete={Boolean(assignmentImpact?.canPermanentDelete)}
+        blockReason="Student or group submissions and grades already exist for this assignment. Archive it instead to keep all records intact."
+        archiveSupported={currentAssignment?.status !== 'archived'}
+        archiveLabel="Archive Assignment"
+        loading={manageLoading}
+        error={manageError}
+        onConfirmArchive={handleArchiveCurrentAssignment}
+        onConfirmDelete={handleConfirmDeleteCurrentAssignment}
       />
     </div>
   )

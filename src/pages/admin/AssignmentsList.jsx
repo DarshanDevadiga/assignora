@@ -16,20 +16,25 @@ import {
   Eye,
   ArrowRight,
   Layers,
-  Cloud
+  Cloud,
+  Archive,
+  RotateCcw
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
+import { useToast } from '../../context/ToastContext'
 import { assignmentsService } from '../../services/assignments.service'
 import { classesService } from '../../services/classes.service'
 import { calculateCompletionRate, isOverdue, formatDisplayDate, formatDeadlineBadge } from '../../utils/calculations'
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
-import Modal from '../../components/common/Modal'
+import ActionMenu from '../../components/common/ActionMenu'
+import ConfirmDeleteModal from '../../components/common/ConfirmDeleteModal'
 import ProgressBar from '../../components/common/ProgressBar'
 
 export default function AssignmentsList() {
   const { user } = useAuth()
+  const toast = useToast()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
@@ -43,10 +48,12 @@ export default function AssignmentsList() {
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('all')
   const [sortBy, setSortBy] = useState('newest')
 
-  // Delete dialog state
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  // Safe Delete / Archive dialog state
   const [deletingAssignment, setDeletingAssignment] = useState(null)
+  const [assignmentImpact, setAssignmentImpact] = useState(null)
+  const [impactLoading, setImpactLoading] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [actionError, setActionError] = useState('')
 
   useEffect(() => {
     loadAssignments()
@@ -76,19 +83,73 @@ export default function AssignmentsList() {
     }
   }
 
-  // Delete Assignment
+  // Open Safe Delete / Archive Dialog
+  const openDeleteDialog = async (assignment) => {
+    setDeletingAssignment(assignment)
+    setActionError('')
+    setAssignmentImpact(null)
+    setImpactLoading(true)
+    try {
+      const impact = await assignmentsService.getAssignmentImpactSummary(assignment.id)
+      setAssignmentImpact(impact)
+    } catch (err) {
+      setActionError(err.message || 'Failed to inspect assignment submission history.')
+    } finally {
+      setImpactLoading(false)
+    }
+  }
+
+  // Delete Assignment (only if zero submissions/grades exist)
   const handleDeleteConfirm = async () => {
     if (!deletingAssignment) return
     try {
       setDeleting(true)
+      setActionError('')
       await assignmentsService.deleteAssignment(deletingAssignment.id)
-      setIsDeleteModalOpen(false)
+      const title = deletingAssignment.title
       setDeletingAssignment(null)
+      toast.success(`Deleted assignment "${title}".`, 'Assignment Deleted')
       await loadAssignments()
     } catch (err) {
       console.error('[AssignmentsList] Error deleting assignment:', err)
+      const msg = err.message || 'Unable to delete assignment.'
+      setActionError(msg)
+      toast.error(msg, 'Delete Blocked')
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const handleArchiveAssignment = async (assignment) => {
+    const target = assignment || deletingAssignment
+    if (!target?.id) return
+    try {
+      setDeleting(true)
+      setActionError('')
+      await assignmentsService.archiveAssignment(target.id)
+      setDeletingAssignment(null)
+      toast.success(
+        `Archived "${target.title}". Existing submissions and grades remain preserved.`,
+        'Assignment Archived'
+      )
+      await loadAssignments()
+    } catch (err) {
+      const msg = err.message || 'Failed to archive assignment.'
+      setActionError(msg)
+      toast.error(msg, 'Archive Failed')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const handleRestoreAssignment = async (assignment) => {
+    if (!assignment?.id) return
+    try {
+      await assignmentsService.restoreAssignment(assignment.id)
+      toast.success(`Restored "${assignment.title}" to published status.`, 'Assignment Restored')
+      await loadAssignments()
+    } catch (err) {
+      toast.error(err.message || 'Failed to restore assignment.')
     }
   }
 
@@ -103,6 +164,7 @@ export default function AssignmentsList() {
         // Status filter
         if (selectedStatusFilter === 'published' && a.status !== 'published') return false
         if (selectedStatusFilter === 'draft' && a.status !== 'draft') return false
+        if (selectedStatusFilter === 'archived' && a.status !== 'archived') return false
         if (selectedStatusFilter === 'overdue' && !isOverdue(a.due_date, a.due_time)) return false
 
         // Search query
@@ -191,6 +253,7 @@ export default function AssignmentsList() {
               <option value="all">All Status</option>
               <option value="published">Published</option>
               <option value="draft">Drafts</option>
+              <option value="archived">Archived</option>
               <option value="overdue">Overdue</option>
             </select>
           </div>
@@ -377,34 +440,59 @@ export default function AssignmentsList() {
                       Track Submissions
                     </Button>
 
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          navigate(`/admin/assignments/${assignment.id}/edit`, {
-                            state: { from: 'assignments', classId: assignment.class_id },
-                          })
-                        }
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-brand-heading hover:bg-white hover:shadow-xs transition-colors cursor-pointer"
-                        title="Edit Assignment"
-                        aria-label="Edit Assignment"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
+                    {assignment.status === 'archived' && (
+                      <Badge variant="neutral" size="sm">
+                        Archived
+                      </Badge>
+                    )}
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDeletingAssignment(assignment)
-                          setIsDeleteModalOpen(true)
-                        }}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-brand-danger hover:bg-white hover:shadow-xs transition-colors cursor-pointer"
-                        title="Delete Assignment"
-                        aria-label="Delete Assignment"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    {user?.role === 'admin' && assignment.admin_id === user?.id && (
+                      <ActionMenu
+                        label={`Actions for ${assignment.title}`}
+                        items={[
+                          {
+                            id: 'view',
+                            label: 'View Submissions',
+                            icon: Eye,
+                            onClick: () =>
+                              navigate(`/admin/assignments/${assignment.id}`, {
+                                state: { from: 'assignments', classId: assignment.class_id },
+                              }),
+                          },
+                          {
+                            id: 'edit',
+                            label: 'Edit Assignment',
+                            icon: Edit2,
+                            onClick: () =>
+                              navigate(`/admin/assignments/${assignment.id}/edit`, {
+                                state: { from: 'assignments', classId: assignment.class_id },
+                              }),
+                          },
+                          assignment.status === 'archived'
+                            ? {
+                                id: 'restore',
+                                label: 'Restore Assignment',
+                                icon: RotateCcw,
+                                onClick: () => handleRestoreAssignment(assignment),
+                              }
+                            : {
+                                id: 'archive',
+                                label: 'Archive Assignment',
+                                icon: Archive,
+                                variant: 'warning',
+                                onClick: () => handleArchiveAssignment(assignment),
+                              },
+                          {
+                            id: 'delete',
+                            label: 'Delete Assignment',
+                            icon: Trash2,
+                            variant: 'danger',
+                            dividerBefore: true,
+                            onClick: () => openDeleteDialog(assignment),
+                          },
+                        ]}
+                      />
+                    )}
                   </div>
                 </div>
               </Card>
@@ -432,27 +520,51 @@ export default function AssignmentsList() {
         </Card>
       )}
 
-      {/* Delete Confirmation Modal */}
-      <Modal
-        isOpen={isDeleteModalOpen}
-        onClose={() => setIsDeleteModalOpen(false)}
-        title="Delete Assignment?"
-        subtitle={`Permanently delete "${deletingAssignment?.title}"`}
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setIsDeleteModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="danger" loading={deleting} onClick={handleDeleteConfirm}>
-              Yes, Delete Assignment
-            </Button>
-          </>
+      {/* Safe Delete / Archive Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(deletingAssignment)}
+        onClose={() => {
+          setDeletingAssignment(null)
+          setActionError('')
+        }}
+        entityLabel="Assignment"
+        entityName={deletingAssignment?.title || ''}
+        entityMeta={
+          deletingAssignment?.submission_type === 'group'
+            ? 'Group Assignment'
+            : 'Individual Assignment'
         }
-      >
-        <p className="text-sm text-brand-body leading-relaxed">
-          Deleting this assignment will also permanently remove all student allocations and student submission records. Are you sure you wish to continue?
-        </p>
-      </Modal>
+        impactLoading={impactLoading}
+        stats={
+          assignmentImpact
+            ? [
+                {
+                  label: 'Individual Subs',
+                  value: assignmentImpact.individualSubmissionsCount,
+                  highlight: assignmentImpact.individualSubmissionsCount > 0,
+                },
+                {
+                  label: 'Group Subs',
+                  value: assignmentImpact.groupSubmissionsCount,
+                  highlight: assignmentImpact.groupSubmissionsCount > 0,
+                },
+                {
+                  label: 'Graded Records',
+                  value: assignmentImpact.totalGradedCount,
+                  highlight: assignmentImpact.totalGradedCount > 0,
+                },
+              ]
+            : []
+        }
+        canPermanentDelete={Boolean(assignmentImpact?.canPermanentDelete)}
+        blockReason="Student or group submissions and grades already exist for this assignment. Permanent deletion is blocked to protect academic records; archive it instead."
+        archiveSupported={deletingAssignment?.status !== 'archived'}
+        archiveLabel="Archive Assignment"
+        loading={deleting}
+        error={actionError}
+        onConfirmArchive={() => handleArchiveAssignment(deletingAssignment)}
+        onConfirmDelete={handleDeleteConfirm}
+      />
     </div>
   )
 }

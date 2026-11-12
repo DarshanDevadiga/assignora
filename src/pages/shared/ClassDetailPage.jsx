@@ -30,10 +30,15 @@ import {
   GraduationCap,
   MessageSquare,
   Search,
-  Crown
+  Crown,
+  Edit2,
+  Archive,
+  RotateCcw
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
+import { useToast } from '../../context/ToastContext'
 import { classesService } from '../../services/classes.service'
+import { assignmentsService } from '../../services/assignments.service'
 import { submissionsService } from '../../services/submissions.service'
 import { announcementsService } from '../../services/announcements.service'
 import { messagesService, addMessageOnce, addOrUpdateMessage, mergeMessages } from '../../services/messages.service'
@@ -55,6 +60,9 @@ import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
 import Modal from '../../components/common/Modal'
+import ActionMenu from '../../components/common/ActionMenu'
+import ConfirmDeleteModal from '../../components/common/ConfirmDeleteModal'
+import EditClassModal from '../../components/class/EditClassModal'
 import { Input, Textarea } from '../../components/common/Input'
 import NotificationBadge from '../../components/common/NotificationBadge'
 
@@ -75,6 +83,7 @@ const TABS = [
 export default function ClassDetailPage() {
   const { id: classId } = useParams()
   const { user } = useAuth()
+  const toast = useToast()
   const { classUnreadCounts = {}, markClassAsRead } = useNotifications()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -135,6 +144,119 @@ export default function ClassDetailPage() {
 
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const refreshClassDetails = () => setRefreshTrigger((prev) => prev + 1)
+
+  // Class & Assignment Safe Management State
+  const [isEditClassOpen, setIsEditClassOpen] = useState(false)
+  const [isDeleteClassOpen, setIsDeleteClassOpen] = useState(false)
+  const [classImpact, setClassImpact] = useState(null)
+  const [classImpactLoading, setClassImpactLoading] = useState(false)
+  const [classDeleteLoading, setClassDeleteLoading] = useState(false)
+  const [classDeleteError, setClassDeleteError] = useState('')
+
+  const [deleteAssignmentTarget, setDeleteAssignmentTarget] = useState(null)
+  const [assignmentImpact, setAssignmentImpact] = useState(null)
+  const [assignmentImpactLoading, setAssignmentImpactLoading] = useState(false)
+  const [assignmentActionLoading, setAssignmentActionLoading] = useState(false)
+  const [assignmentActionError, setAssignmentActionError] = useState('')
+
+  const openDeleteClassDialog = async () => {
+    if (!currentClass?.id) return
+    setIsDeleteClassOpen(true)
+    setClassDeleteError('')
+    setClassImpact(null)
+    setClassImpactLoading(true)
+    try {
+      const impact = await classesService.getClassImpactSummary(currentClass.id)
+      setClassImpact(impact)
+    } catch (err) {
+      setClassDeleteError(err.message || 'Failed to inspect associated class records.')
+    } finally {
+      setClassImpactLoading(false)
+    }
+  }
+
+  const handleConfirmDeleteClass = async () => {
+    if (!currentClass?.id) return
+    try {
+      setClassDeleteLoading(true)
+      setClassDeleteError('')
+      await classesService.deleteClass(currentClass.id)
+      const name = currentClass.name
+      setIsDeleteClassOpen(false)
+      toast.success(`Deleted empty class "${name}".`, 'Class Deleted')
+      navigate('/admin/classes')
+    } catch (err) {
+      const msg = err.message || 'Unable to delete class.'
+      setClassDeleteError(msg)
+      toast.error(msg, 'Delete Blocked')
+    } finally {
+      setClassDeleteLoading(false)
+    }
+  }
+
+  const openDeleteAssignmentDialog = async (assignment) => {
+    setDeleteAssignmentTarget(assignment)
+    setAssignmentActionError('')
+    setAssignmentImpact(null)
+    setAssignmentImpactLoading(true)
+    try {
+      const impact = await assignmentsService.getAssignmentImpactSummary(assignment.id)
+      setAssignmentImpact(impact)
+    } catch (err) {
+      setAssignmentActionError(err.message || 'Failed to inspect assignment submission history.')
+    } finally {
+      setAssignmentImpactLoading(false)
+    }
+  }
+
+  const handleArchiveAssignmentItem = async (targetAssignment) => {
+    const item = targetAssignment || deleteAssignmentTarget
+    if (!item?.id) return
+    try {
+      setAssignmentActionLoading(true)
+      setAssignmentActionError('')
+      await assignmentsService.archiveAssignment(item.id)
+      setDeleteAssignmentTarget(null)
+      toast.success(`Archived "${item.title}". Submissions and marks remain preserved.`, 'Assignment Archived')
+      refreshClassDetails()
+    } catch (err) {
+      const msg = err.message || 'Failed to archive assignment.'
+      setAssignmentActionError(msg)
+      toast.error(msg, 'Archive Failed')
+    } finally {
+      setAssignmentActionLoading(false)
+    }
+  }
+
+  const handleRestoreAssignmentItem = async (assignment) => {
+    if (!assignment?.id) return
+    try {
+      await assignmentsService.restoreAssignment(assignment.id)
+      toast.success(`Restored "${assignment.title}" to published status.`, 'Assignment Restored')
+      refreshClassDetails()
+    } catch (err) {
+      toast.error(err.message || 'Failed to restore assignment.')
+    }
+  }
+
+  const handleConfirmDeleteAssignment = async () => {
+    if (!deleteAssignmentTarget?.id) return
+    try {
+      setAssignmentActionLoading(true)
+      setAssignmentActionError('')
+      await assignmentsService.deleteAssignment(deleteAssignmentTarget.id)
+      const title = deleteAssignmentTarget.title
+      setDeleteAssignmentTarget(null)
+      toast.success(`Deleted assignment "${title}".`, 'Assignment Deleted')
+      refreshClassDetails()
+    } catch (err) {
+      const msg = err.message || 'Unable to delete assignment.'
+      setAssignmentActionError(msg)
+      toast.error(msg, 'Delete Blocked')
+    } finally {
+      setAssignmentActionLoading(false)
+    }
+  }
 
   // Stable references for realtime listener closures to prevent stale state and unnecessary channel reconnects
   const userRef = useRef(user)
@@ -752,14 +874,39 @@ export default function ClassDetailPage() {
 
             {/* Teacher Actions */}
             {isTeacher && (
-              <Button
-                variant="white"
-                icon={UserPlus}
-                onClick={() => setIsInviteOpen(true)}
-                className="font-bold text-brand-primary shadow-lg"
-              >
-                Invite Students
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="white"
+                  icon={UserPlus}
+                  onClick={() => setIsInviteOpen(true)}
+                  className="font-bold text-brand-primary shadow-lg"
+                >
+                  Invite Students
+                </Button>
+                {currentClass.admin_id === user?.id && (
+                  <ActionMenu
+                    label={`Manage ${currentClass.name}`}
+                    buttonClassName="p-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white border border-white/25 transition-colors cursor-pointer"
+                    iconSize="w-4 h-4"
+                    items={[
+                      {
+                        id: 'edit-class',
+                        label: 'Edit Class Details',
+                        icon: Edit2,
+                        onClick: () => setIsEditClassOpen(true),
+                      },
+                      {
+                        id: 'delete-class',
+                        label: 'Delete Class',
+                        icon: Trash2,
+                        variant: 'danger',
+                        dividerBefore: true,
+                        onClick: () => openDeleteClassDialog(),
+                      },
+                    ]}
+                  />
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -1143,9 +1290,11 @@ export default function ClassDetailPage() {
             )}
           </div>
 
-          {assignments.length > 0 ? (
+          {assignments.filter((a) => isTeacher || a.status !== 'archived' || mySubmissions.some((s) => s.assignment_id === a.id)).length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {assignments.map((assignment) => {
+              {assignments
+                .filter((a) => isTeacher || a.status !== 'archived' || mySubmissions.some((s) => s.assignment_id === a.id))
+                .map((assignment) => {
                 const deadlineBadge = formatDeadlineBadge(assignment.due_date, assignment.due_time)
                 const isPastDue = isOverdue(assignment.due_date, assignment.due_time)
 
@@ -1177,7 +1326,11 @@ export default function ClassDetailPage() {
                           <span className="text-xs font-bold text-brand-primary bg-brand-light px-2.5 py-0.5 rounded-full shrink-0">
                             {assignment.points} pts
                           </span>
-                          {isPastDue ? (
+                          {assignment.status === 'archived' ? (
+                            <Badge variant="neutral" size="sm">
+                              Archived
+                            </Badge>
+                          ) : isPastDue ? (
                             <Badge variant="danger" size="sm">
                               Past Due
                             </Badge>
@@ -1192,6 +1345,54 @@ export default function ClassDetailPage() {
                             </Badge>
                           )}
                         </div>
+
+                        {isTeacher && (assignment.admin_id === user?.id || currentClass.admin_id === user?.id) && (
+                          <ActionMenu
+                            label={`Actions for ${assignment.title}`}
+                            items={[
+                              {
+                                id: 'view',
+                                label: 'View Submissions',
+                                icon: Eye,
+                                onClick: () =>
+                                  navigate(`/admin/assignments/${assignment.id}`, {
+                                    state: { from: 'class', classId, tab: 'assignments' },
+                                  }),
+                              },
+                              {
+                                id: 'edit',
+                                label: 'Edit Assignment',
+                                icon: Edit2,
+                                onClick: () =>
+                                  navigate(`/admin/assignments/${assignment.id}/edit`, {
+                                    state: { from: 'class', classId, tab: 'assignments' },
+                                  }),
+                              },
+                              assignment.status === 'archived'
+                                ? {
+                                    id: 'restore',
+                                    label: 'Restore Assignment',
+                                    icon: RotateCcw,
+                                    onClick: () => handleRestoreAssignmentItem(assignment),
+                                  }
+                                : {
+                                    id: 'archive',
+                                    label: 'Archive Assignment',
+                                    icon: Archive,
+                                    variant: 'warning',
+                                    onClick: () => handleArchiveAssignmentItem(assignment),
+                                  },
+                              {
+                                id: 'delete',
+                                label: 'Delete Assignment',
+                                icon: Trash2,
+                                variant: 'danger',
+                                dividerBefore: true,
+                                onClick: () => openDeleteAssignmentDialog(assignment),
+                              },
+                            ]}
+                          />
+                        )}
 
                         {/* Student submission indicator badge */}
                         {!isTeacher && (
@@ -2009,6 +2210,78 @@ export default function ClassDetailPage() {
           </div>
         </form>
       </Modal>
+
+      {/* Edit Class Modal */}
+      <EditClassModal
+        isOpen={isEditClassOpen}
+        onClose={() => setIsEditClassOpen(false)}
+        classData={currentClass}
+        onSuccess={() => refreshClassDetails()}
+      />
+
+      {/* Safe Delete Class Modal */}
+      <ConfirmDeleteModal
+        isOpen={isDeleteClassOpen}
+        onClose={() => {
+          setIsDeleteClassOpen(false)
+          setClassDeleteError('')
+        }}
+        entityLabel="Class"
+        entityName={currentClass?.name || ''}
+        entityMeta={currentClass?.class_code ? `Code: ${currentClass.class_code}` : ''}
+        impactLoading={classImpactLoading}
+        stats={
+          classImpact
+            ? [
+                { label: 'Students', value: classImpact.studentsCount, highlight: classImpact.studentsCount > 0 },
+                { label: 'Assignments', value: classImpact.assignmentsCount, highlight: classImpact.assignmentsCount > 0 },
+                { label: 'Groups', value: classImpact.groupsCount, highlight: classImpact.groupsCount > 0 },
+                { label: 'Submissions', value: classImpact.totalSubmissionsCount, highlight: classImpact.totalSubmissionsCount > 0 },
+                { label: 'Graded Records', value: classImpact.totalGradedCount, highlight: classImpact.totalGradedCount > 0 },
+              ]
+            : []
+        }
+        canPermanentDelete={Boolean(classImpact?.canPermanentDelete)}
+        blockReason="This class contains enrolled students, assignments, groups, or recorded submissions/grades. Permanent deletion is blocked to preserve historical records."
+        requireTypedDelete
+        loading={classDeleteLoading}
+        error={classDeleteError}
+        onConfirmDelete={handleConfirmDeleteClass}
+      />
+
+      {/* Safe Delete / Archive Assignment Modal */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(deleteAssignmentTarget)}
+        onClose={() => {
+          setDeleteAssignmentTarget(null)
+          setAssignmentActionError('')
+        }}
+        entityLabel="Assignment"
+        entityName={deleteAssignmentTarget?.title || ''}
+        entityMeta={
+          deleteAssignmentTarget?.submission_type === 'group'
+            ? 'Group Assignment'
+            : 'Individual Assignment'
+        }
+        impactLoading={assignmentImpactLoading}
+        stats={
+          assignmentImpact
+            ? [
+                { label: 'Individual Subs', value: assignmentImpact.individualSubmissionsCount, highlight: assignmentImpact.individualSubmissionsCount > 0 },
+                { label: 'Group Subs', value: assignmentImpact.groupSubmissionsCount, highlight: assignmentImpact.groupSubmissionsCount > 0 },
+                { label: 'Graded Records', value: assignmentImpact.totalGradedCount, highlight: assignmentImpact.totalGradedCount > 0 },
+              ]
+            : []
+        }
+        canPermanentDelete={Boolean(assignmentImpact?.canPermanentDelete)}
+        blockReason="Student or group submissions and grades already exist for this assignment. Archive it instead to protect academic history."
+        archiveSupported={deleteAssignmentTarget?.status !== 'archived'}
+        archiveLabel="Archive Assignment"
+        loading={assignmentActionLoading}
+        error={assignmentActionError}
+        onConfirmArchive={() => handleArchiveAssignmentItem(deleteAssignmentTarget)}
+        onConfirmDelete={handleConfirmDeleteAssignment}
+      />
     </div>
   )
 }

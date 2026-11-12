@@ -4,7 +4,6 @@ import {
   Plus,
   BookOpen,
   Users,
-  MoreVertical,
   Edit2,
   Trash2,
   Code2,
@@ -25,9 +24,13 @@ import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
 import Modal from '../../components/common/Modal'
+import ActionMenu from '../../components/common/ActionMenu'
+import ConfirmDeleteModal from '../../components/common/ConfirmDeleteModal'
+import EditClassModal from '../../components/class/EditClassModal'
 import { Input, Textarea } from '../../components/common/Input'
 import NotificationBadge from '../../components/common/NotificationBadge'
 import { useNotifications } from '../../context/NotificationContext'
+import { useToast } from '../../context/ToastContext'
 
 const InviteStudentModal = lazy(() => import('../../components/class/InviteStudentModal'))
 const JoinClassModal = lazy(() => import('../../components/class/JoinClassModal'))
@@ -57,6 +60,7 @@ const THEMES = [
 
 export default function ClassesManagement() {
   const { user } = useAuth()
+  const toast = useToast()
   const { classUnreadCounts = {} } = useNotifications()
   const navigate = useNavigate()
 
@@ -74,27 +78,14 @@ export default function ClassesManagement() {
   const [creating, setCreating] = useState(false)
 
   // Edit Modal State
-  const [isEditOpen, setIsEditOpen] = useState(false)
   const [editingClass, setEditingClass] = useState(null)
-  const [editName, setEditName] = useState('')
-  const [editSubject, setEditSubject] = useState('')
-  const [editDesc, setEditDesc] = useState('')
-  const [updating, setUpdating] = useState(false)
 
-  // Delete Confirmation State
-  const [isDeleteOpen, setIsDeleteOpen] = useState(false)
-  const [deletingClassId, setDeletingClassId] = useState(null)
+  // Safe Delete Confirmation State
+  const [deletingClass, setDeletingClass] = useState(null)
+  const [classImpact, setClassImpact] = useState(null)
+  const [impactLoading, setImpactLoading] = useState(false)
   const [deleting, setDeleting] = useState(false)
-
-  // Active dropdown menu per card
-  const [activeMenuId, setActiveMenuId] = useState(null)
-
-  useEffect(() => {
-    if (!activeMenuId) return undefined
-    const handleOutsideClick = () => setActiveMenuId(null)
-    document.addEventListener('mousedown', handleOutsideClick)
-    return () => document.removeEventListener('mousedown', handleOutsideClick)
-  }, [activeMenuId])
+  const [deleteError, setDeleteError] = useState('')
 
   // Invite Modal State
   const [inviteModalClass, setInviteModalClass] = useState(null)
@@ -145,7 +136,7 @@ export default function ClassesManagement() {
 
     try {
       setCreating(true)
-      await classesService.createClass({
+      const created = await classesService.createClass({
         name: createName,
         subject: createSubject,
         description: createDesc,
@@ -155,67 +146,54 @@ export default function ClassesManagement() {
       setCreateName('')
       setCreateSubject('')
       setCreateDesc('')
-      await loadClasses()
+      toast.success(`Created class "${created?.name || createName}".`, 'Class Created')
+      await loadClasses({ force: true })
     } catch (err) {
       console.error('[ClassesManagement] Error creating class:', err)
+      toast.error(err.message || 'Failed to create class.')
     } finally {
       setCreating(false)
     }
   }
 
   // Open Edit Modal
-  const handleOpenEdit = (cls, e) => {
-    e.stopPropagation()
-    setActiveMenuId(null)
+  const handleOpenEdit = (cls) => {
     setEditingClass(cls)
-    setEditName(cls.name)
-    setEditSubject(cls.subject || '')
-    setEditDesc(cls.description || '')
-    setIsEditOpen(true)
   }
 
-  // Update Class
-  const handleUpdateSubmit = async (e) => {
-    e.preventDefault()
-    if (!editName.trim() || !editingClass) return
-
+  // Open Safe Delete Dialog with Live Impact Inspection
+  const handleOpenDelete = async (cls) => {
+    setDeletingClass(cls)
+    setDeleteError('')
+    setClassImpact(null)
+    setImpactLoading(true)
     try {
-      setUpdating(true)
-      await classesService.updateClass(editingClass.id, {
-        name: editName,
-        subject: editSubject,
-        description: editDesc,
-      })
-      setIsEditOpen(false)
-      setEditingClass(null)
-      await loadClasses()
+      const impact = await classesService.getClassImpactSummary(cls.id)
+      setClassImpact(impact)
     } catch (err) {
-      console.error('[ClassesManagement] Error updating class:', err)
+      setDeleteError(err.message || 'Failed to inspect associated class records.')
     } finally {
-      setUpdating(false)
+      setImpactLoading(false)
     }
   }
 
-  // Open Delete Dialog
-  const handleOpenDelete = (clsId, e) => {
-    e.stopPropagation()
-    setActiveMenuId(null)
-    setDeletingClassId(clsId)
-    setIsDeleteOpen(true)
-  }
-
-  // Delete Class
+  // Delete Class (strictly empty only)
   const handleDeleteConfirm = async () => {
-    if (!deletingClassId) return
+    if (!deletingClass?.id) return
 
     try {
       setDeleting(true)
-      await classesService.deleteClass(deletingClassId)
-      setIsDeleteOpen(false)
-      setDeletingClassId(null)
-      await loadClasses()
+      setDeleteError('')
+      await classesService.deleteClass(deletingClass.id)
+      const removedName = deletingClass.name
+      setDeletingClass(null)
+      toast.success(`Deleted empty class "${removedName}".`, 'Class Deleted')
+      await loadClasses({ force: true })
     } catch (err) {
       console.error('[ClassesManagement] Error deleting class:', err)
+      const msg = err.message || 'Unable to delete class.'
+      setDeleteError(msg)
+      toast.error(msg, 'Delete Blocked')
     } finally {
       setDeleting(false)
     }
@@ -277,9 +255,7 @@ export default function ClassesManagement() {
               <div
                 key={cls.id}
                 onClick={() => navigate(`/${isTeacher ? 'admin' : 'student'}/classes/${cls.id}`)}
-                className={`group relative bg-white rounded-2xl border border-brand-line/80 shadow-card hover:shadow-card-hover hover:border-brand-border transition-all duration-200 cursor-pointer flex flex-col justify-between ${
-                  activeMenuId === cls.id ? 'z-dropdown' : ''
-                }`}
+                className="group relative bg-white rounded-2xl border border-brand-line/80 shadow-card hover:shadow-card-hover hover:border-brand-border transition-all duration-200 cursor-pointer flex flex-col justify-between"
               >
                 {/* Colored Top Header Banner */}
                 <div className={`p-5 text-white ${theme.bg} relative rounded-t-2xl`}>
@@ -306,88 +282,51 @@ export default function ClassesManagement() {
                       </div>
                     </div>
 
-                    {/* 3-dots Menu Button */}
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setActiveMenuId(activeMenuId === cls.id ? null : cls.id)
-                        }}
-                        className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/20 transition-colors cursor-pointer"
-                      >
-                        <MoreVertical className="w-5 h-5" />
-                      </button>
-
-                      {activeMenuId === cls.id && (
-                        <div
-                          className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-modal border border-brand-line py-1 z-dropdown text-left"
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              navigate(`/${isTeacher ? 'admin' : 'student'}/classes/${cls.id}`)
-                            }}
-                            className="w-full px-3.5 py-2 text-xs font-medium text-brand-body hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-                          >
-                            <BookOpen className="w-3.5 h-3.5 text-brand-primary" />
-                            <span>Open Class</span>
-                          </button>
-
-                          {isTeacher && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  setInviteModalClass(cls)
-                                  setActiveMenuId(null)
-                                }}
-                                className="w-full px-3.5 py-2 text-xs font-medium text-brand-body hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-                              >
-                                <UserPlus className="w-3.5 h-3.5 text-brand-primary" />
-                                <span>Invite Students</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  navigate(`/admin/classes/${cls.id}?tab=people`)
-                                }}
-                                className="w-full px-3.5 py-2 text-xs font-medium text-brand-body hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-                              >
-                                <Users className="w-3.5 h-3.5 text-slate-400" />
-                                <span>Class People</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={(e) => handleOpenEdit(cls, e)}
-                                className="w-full px-3.5 py-2 text-xs font-medium text-brand-body hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
-                              >
-                                <Edit2 className="w-3.5 h-3.5 text-slate-400" />
-                                <span>Edit Class</span>
-                              </button>
-
-                              <div className="border-t border-brand-line my-1" />
-
-                              <button
-                                type="button"
-                                onClick={(e) => handleOpenDelete(cls.id, e)}
-                                className="w-full px-3.5 py-2 text-xs font-medium text-brand-danger hover:bg-rose-50 flex items-center gap-2 cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                                <span>Delete Class</span>
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                    {/* 3-dots Actions Menu */}
+                    <ActionMenu
+                      label={`Actions for ${cls.name}`}
+                      buttonClassName="p-1.5 rounded-lg text-white/85 hover:text-white hover:bg-white/20 transition-colors cursor-pointer"
+                      iconSize="w-5 h-5"
+                      items={[
+                        {
+                          id: 'open',
+                          label: 'View Class',
+                          icon: BookOpen,
+                          onClick: () =>
+                            navigate(`/${isTeacher ? 'admin' : 'student'}/classes/${cls.id}`),
+                        },
+                        ...(isTeacher && cls.admin_id === user?.id
+                          ? [
+                              {
+                                id: 'invite',
+                                label: 'Invite Students',
+                                icon: UserPlus,
+                                onClick: () => setInviteModalClass(cls),
+                              },
+                              {
+                                id: 'people',
+                                label: 'Class People',
+                                icon: Users,
+                                onClick: () => navigate(`/admin/classes/${cls.id}?tab=people`),
+                              },
+                              {
+                                id: 'edit',
+                                label: 'Edit Class',
+                                icon: Edit2,
+                                onClick: () => handleOpenEdit(cls),
+                              },
+                              {
+                                id: 'delete',
+                                label: 'Delete Class',
+                                icon: Trash2,
+                                variant: 'danger',
+                                dividerBefore: true,
+                                onClick: () => handleOpenDelete(cls),
+                              },
+                            ]
+                          : []),
+                      ]}
+                    />
                   </div>
 
                   <p className="mt-3 text-xs text-white/70 line-clamp-2 min-h-[32px]">
@@ -488,66 +427,42 @@ export default function ClassesManagement() {
       </Modal>
 
       {/* Modal: Edit Class */}
-      <Modal
-        isOpen={isEditOpen}
-        onClose={() => setIsEditOpen(false)}
-        title="Edit Class"
-        subtitle="Update course information."
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setIsEditOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" loading={updating} onClick={handleUpdateSubmit}>
-              Save Changes
-            </Button>
-          </>
+      <EditClassModal
+        isOpen={Boolean(editingClass)}
+        onClose={() => setEditingClass(null)}
+        classData={editingClass}
+        onSuccess={() => loadClasses({ force: true })}
+      />
+
+      {/* Modal: Safe Delete Confirmation */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(deletingClass)}
+        onClose={() => {
+          setDeletingClass(null)
+          setDeleteError('')
+        }}
+        entityLabel="Class"
+        entityName={deletingClass?.name || ''}
+        entityMeta={deletingClass?.class_code ? `Code: ${deletingClass.class_code}` : ''}
+        impactLoading={impactLoading}
+        stats={
+          classImpact
+            ? [
+                { label: 'Students', value: classImpact.studentsCount, highlight: classImpact.studentsCount > 0 },
+                { label: 'Assignments', value: classImpact.assignmentsCount, highlight: classImpact.assignmentsCount > 0 },
+                { label: 'Groups', value: classImpact.groupsCount, highlight: classImpact.groupsCount > 0 },
+                { label: 'Submissions', value: classImpact.totalSubmissionsCount, highlight: classImpact.totalSubmissionsCount > 0 },
+                { label: 'Graded Records', value: classImpact.totalGradedCount, highlight: classImpact.totalGradedCount > 0 },
+              ]
+            : []
         }
-      >
-        <form onSubmit={handleUpdateSubmit} className="space-y-4">
-          <Input
-            label="Class Name"
-            required
-            value={editName}
-            onChange={(e) => setEditName(e.target.value)}
-          />
-
-          <Input
-            label="Subject / Code"
-            value={editSubject}
-            onChange={(e) => setEditSubject(e.target.value)}
-          />
-
-          <Textarea
-            label="Description"
-            rows={3}
-            value={editDesc}
-            onChange={(e) => setEditDesc(e.target.value)}
-          />
-        </form>
-      </Modal>
-
-      {/* Modal: Delete Confirmation */}
-      <Modal
-        isOpen={isDeleteOpen}
-        onClose={() => setIsDeleteOpen(false)}
-        title="Delete Class?"
-        subtitle="This action cannot be undone. All class assignments, memberships, and submissions will also be deleted."
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setIsDeleteOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="danger" loading={deleting} onClick={handleDeleteConfirm}>
-              Yes, Delete Class
-            </Button>
-          </>
-        }
-      >
-        <p className="text-sm text-brand-body leading-relaxed">
-          Are you sure you want to permanently delete this class? Students will no longer have access to its materials and assignments.
-        </p>
-      </Modal>
+        canPermanentDelete={Boolean(classImpact?.canPermanentDelete)}
+        blockReason="This class contains enrolled students, assignments, groups, or recorded submissions/grades. Permanent deletion is disabled so Round 1 and Round 2 historical records remain intact."
+        requireTypedDelete
+        loading={deleting}
+        error={deleteError}
+        onConfirmDelete={handleDeleteConfirm}
+      />
 
       {/* Modal: Invite Students */}
       {Boolean(inviteModalClass) && (

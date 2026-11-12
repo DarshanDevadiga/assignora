@@ -5,14 +5,15 @@ export const notificationsService = {
   /**
    * Get all notifications for the logged-in user
    */
-  async getUserNotifications(userId) {
+  async getUserNotifications(userId, limit = 50) {
     if (!userId) return []
 
     const { data, error } = await supabase
       .from('notifications')
-      .select('*')
+      .select('id, user_id, title, message, type, reference_id, is_read, created_at')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
+      .limit(limit)
 
     if (error) {
       console.warn('[notificationsService] Error fetching notifications:', error.message)

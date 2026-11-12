@@ -1,91 +1,188 @@
 import { supabase } from '../lib/supabase.js'
+import { fetchWithCache, invalidateCachePrefix } from '../utils/dataCache.js'
+
+function invalidateAssignmentMutationCaches(assignmentId) {
+  invalidateCachePrefix(
+    'adminAssignments:',
+    'adminAssignmentSummaries:',
+    'adminClasses:',
+    'studentClasses:',
+    'studentDashboard:',
+    'classDetail:',
+    'classSubmissions:',
+    'studentSubmissions:',
+    'groupAssignments:',
+    'groupSubmissions:'
+  )
+  if (assignmentId) {
+    invalidateCachePrefix(`assignmentDetail:${assignmentId}`)
+  } else {
+    invalidateCachePrefix('assignmentDetail:')
+  }
+}
 
 export const assignmentsService = {
   /**
-   * Get all assignments created by the admin
+   * Get all assignments created by the admin (cached + deduplicated)
    */
-  async getAdminAssignments(adminId) {
-    const { data, error } = await supabase
-      .from('assignments')
-      .select(`
-        *,
-        classes (
-          id,
-          name,
-          subject,
-          class_members (
+  async getAdminAssignments(adminId, forceRefresh = false) {
+    if (!adminId) return []
+    return fetchWithCache(
+      `adminAssignments:${adminId}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('assignments')
+          .select(`
             id,
-            student_id,
-            users:student_id (id, name, email, avatar, student_id)
-          )
-        ),
-        assignment_students (
-          id,
-          student_id,
-          users:student_id (id, name, email, avatar, student_id)
-        ),
-        submissions (
-          id,
-          student_id,
-          status,
-          submitted_at,
-          submission_link,
-          comment,
-          users:student_id (id, name, email, avatar, student_id)
-        )
-      `)
-      .eq('admin_id', adminId)
-      .order('created_at', { ascending: false })
+            title,
+            description,
+            class_id,
+            admin_id,
+            due_date,
+            due_time,
+            drive_link,
+            onedrive_link,
+            submission_type,
+            points,
+            assign_to_all,
+            status,
+            created_at,
+            updated_at,
+            classes (
+              id,
+              name,
+              subject,
+              class_members (
+                id,
+                student_id,
+                users:student_id (id, name, email, avatar, student_id)
+              )
+            ),
+            assignment_students (
+              id,
+              student_id,
+              users:student_id (id, name, email, avatar, student_id)
+            ),
+            submissions (
+              id,
+              student_id,
+              status,
+              submitted_at,
+              submission_link,
+              comment,
+              users:student_id (id, name, email, avatar, student_id)
+            )
+          `)
+          .eq('admin_id', adminId)
+          .order('created_at', { ascending: false })
 
-    if (error) {
-      console.error('[assignmentsService] Error fetching admin assignments:', error)
-      throw error
-    }
-    return data || []
+        if (error) {
+          console.error('[assignmentsService] Error fetching admin assignments:', error)
+          throw error
+        }
+        return data || []
+      },
+      { ttlMs: 45000, forceRefresh }
+    )
   },
 
   /**
-   * Get assignment by id with class members and submissions
+   * Lightweight list of assignment headers for selector dropdowns (avoids nested submission/member joins)
    */
-  async getAssignmentById(assignmentId) {
-    const { data, error } = await supabase
-      .from('assignments')
-      .select(`
-        *,
-        classes (
-          id,
-          name,
-          subject,
-          class_members (
+  async getAdminAssignmentSummaries(adminId, forceRefresh = false) {
+    if (!adminId) return []
+    return fetchWithCache(
+      `adminAssignmentSummaries:${adminId}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('assignments')
+          .select(`
             id,
-            student_id,
-            users:student_id (id, name, email, avatar, student_id)
-          )
-        ),
-        assignment_students (
-          id,
-          student_id,
-          users:student_id (id, name, email, avatar, student_id)
-        ),
-        submissions (
-          id,
-          student_id,
-          submission_link,
-          comment,
-          status,
-          submitted_at,
-          updated_at,
-          users:student_id (id, name, email, avatar, student_id)
-        )
-      `)
-      .eq('id', assignmentId)
-      .single()
+            title,
+            class_id,
+            due_date,
+            due_time,
+            submission_type,
+            status,
+            created_at,
+            classes (id, name, subject)
+          `)
+          .eq('admin_id', adminId)
+          .order('created_at', { ascending: false })
 
-    if (error) {
-      console.error('[assignmentsService] Error fetching assignment details:', error)
-      throw error
-    }
-    return data
+        if (error) {
+          console.error('[assignmentsService] Error fetching assignment summaries:', error)
+          throw error
+        }
+        return data || []
+      },
+      { ttlMs: 45000, forceRefresh }
+    )
+  },
+
+  /**
+   * Get assignment by id with class members and submissions (cached + deduplicated)
+   */
+  async getAssignmentById(assignmentId, forceRefresh = false) {
+    if (!assignmentId) return null
+    return fetchWithCache(
+      `assignmentDetail:${assignmentId}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('assignments')
+          .select(`
+            id,
+            title,
+            description,
+            class_id,
+            admin_id,
+            due_date,
+            due_time,
+            drive_link,
+            onedrive_link,
+            submission_type,
+            points,
+            assign_to_all,
+            status,
+            created_at,
+            updated_at,
+            classes (
+              id,
+              name,
+              subject,
+              class_members (
+                id,
+                student_id,
+                users:student_id (id, name, email, avatar, student_id)
+              )
+            ),
+            assignment_students (
+              id,
+              student_id,
+              users:student_id (id, name, email, avatar, student_id)
+            ),
+            submissions (
+              id,
+              student_id,
+              submission_link,
+              comment,
+              status,
+              submitted_at,
+              updated_at,
+              users:student_id (id, name, email, avatar, student_id)
+            )
+          `)
+          .eq('id', assignmentId)
+          .single()
+
+        if (error) {
+          console.error('[assignmentsService] Error fetching assignment details:', error)
+          throw error
+        }
+        return data
+      },
+      { ttlMs: 30000, forceRefresh }
+    )
   },
 
   /**
@@ -151,6 +248,7 @@ export const assignmentsService = {
       }
     }
 
+    invalidateAssignmentMutationCaches(newAssignment?.id)
     return newAssignment
   },
 
@@ -218,6 +316,7 @@ export const assignmentsService = {
       }
     }
 
+    invalidateAssignmentMutationCaches(assignmentId)
     return data
   },
 
@@ -232,6 +331,7 @@ export const assignmentsService = {
       console.error('[assignmentsService] Error deleting assignment:', error)
       throw error
     }
+    invalidateAssignmentMutationCaches(assignmentId)
     return true
   },
 }

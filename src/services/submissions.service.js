@@ -1,33 +1,65 @@
 import { supabase } from '../lib/supabase.js'
+import { fetchWithCache, invalidateCachePrefix } from '../utils/dataCache.js'
+
+function invalidateSubmissionMutationCaches(assignmentId) {
+  invalidateCachePrefix(
+    'studentSubmissions:',
+    'classSubmissions:',
+    'studentDashboard:',
+    'adminAssignments:',
+    'classDetail:',
+    'groupSubmissions:',
+    'groupAssignments:'
+  )
+  if (assignmentId) {
+    invalidateCachePrefix(`assignmentDetail:${assignmentId}`)
+  } else {
+    invalidateCachePrefix('assignmentDetail:')
+  }
+}
 
 export const submissionsService = {
   /**
-   * Get all submissions for a student
+   * Get all submissions for a student (cached + deduplicated)
    */
-  async getStudentSubmissions(studentId) {
-    const { data, error } = await supabase
-      .from('submissions')
-      .select(`
-        *,
-        assignments (
-          id,
-          title,
-          description,
-          due_date,
-          due_time,
-          points,
-          drive_link,
-          classes (id, name, subject)
-        )
-      `)
-      .eq('student_id', studentId)
-      .order('submitted_at', { ascending: false })
+  async getStudentSubmissions(studentId, forceRefresh = false) {
+    if (!studentId) return []
+    return fetchWithCache(
+      `studentSubmissions:${studentId}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('submissions')
+          .select(`
+            id,
+            assignment_id,
+            student_id,
+            submission_link,
+            comment,
+            status,
+            submitted_at,
+            updated_at,
+            assignments (
+              id,
+              title,
+              description,
+              due_date,
+              due_time,
+              points,
+              drive_link,
+              classes (id, name, subject)
+            )
+          `)
+          .eq('student_id', studentId)
+          .order('submitted_at', { ascending: false })
 
-    if (error) {
-      console.error('[submissionsService] Error fetching student submissions:', error)
-      throw error
-    }
-    return data || []
+        if (error) {
+          console.error('[submissionsService] Error fetching student submissions:', error)
+          throw error
+        }
+        return data || []
+      },
+      { ttlMs: 30000, forceRefresh }
+    )
   },
 
   /**
@@ -36,7 +68,7 @@ export const submissionsService = {
   async getStudentAssignmentSubmission(assignmentId, studentId) {
     const { data, error } = await supabase
       .from('submissions')
-      .select('*')
+      .select('id, assignment_id, student_id, submission_link, comment, status, submitted_at, updated_at')
       .eq('assignment_id', assignmentId)
       .eq('student_id', studentId)
       .maybeSingle()
@@ -45,6 +77,7 @@ export const submissionsService = {
       console.error('[submissionsService] Error fetching submission status:', error)
       throw error
     }
+    invalidateSubmissionMutationCaches(assignmentId)
     return data
   },
 
@@ -82,6 +115,7 @@ export const submissionsService = {
       throw error
     }
 
+    invalidateSubmissionMutationCaches(assignmentId)
     return data
   },
 
@@ -164,6 +198,7 @@ export const submissionsService = {
         console.error('[submissionsService] Error updating grade:', error)
         throw error
       }
+      invalidateSubmissionMutationCaches(assignmentId)
       return data
     } else {
       const { data, error } = await supabase
@@ -187,6 +222,7 @@ export const submissionsService = {
         console.error('[submissionsService] Error creating graded submission:', error)
         throw error
       }
+      invalidateSubmissionMutationCaches(assignmentId)
       return data
     }
   },
@@ -238,62 +274,82 @@ export const submissionsService = {
       console.error('[submissionsService] Error grading submission:', error)
       throw error
     }
+    invalidateSubmissionMutationCaches(data?.assignment_id || data?.assignments?.id)
     return data
   },
 
   /**
-   * Get all submissions belonging to a specific class
+   * Get all submissions belonging to a specific class.
+   * Accepts optional pre-fetched assignment IDs to skip redundant assignments query.
    */
-  async getClassSubmissions(classId) {
-    // 1. Get assignments in this class
-    const { data: assignments, error: aErr } = await supabase
-      .from('assignments')
-      .select('id, title, points, due_date')
-      .eq('class_id', classId)
+  async getClassSubmissions(classId, prefetchedAssignmentIds = null, forceRefresh = false) {
+    if (!classId) return []
+    return fetchWithCache(
+      `classSubmissions:${classId}`,
+      async () => {
+        let assignmentIds = Array.isArray(prefetchedAssignmentIds) ? prefetchedAssignmentIds : null
 
-    if (aErr || !assignments || assignments.length === 0) {
-      return []
-    }
+        if (!assignmentIds) {
+          const { data: assignments, error: aErr } = await supabase
+            .from('assignments')
+            .select('id')
+            .eq('class_id', classId)
 
-    const assignmentIds = assignments.map((a) => a.id)
+          if (aErr || !assignments || assignments.length === 0) {
+            return []
+          }
+          assignmentIds = assignments.map((a) => a.id)
+        }
 
-    // 2. Get submissions for these assignments
-    const { data, error } = await supabase
-      .from('submissions')
-      .select(`
-        *,
-        assignments (
-          id,
-          title,
-          points,
-          due_date,
-          class_id
-        ),
-        users:student_id (
-          id,
-          name,
-          email,
-          avatar,
-          student_id
-        )
-      `)
-      .in('assignment_id', assignmentIds)
-      .order('submitted_at', { ascending: false })
+        if (assignmentIds.length === 0) return []
 
-    if (error) {
-      console.error('[submissionsService] Error fetching class submissions:', error)
-      throw error
-    }
+        // Get submissions for these assignments
+        const { data, error } = await supabase
+          .from('submissions')
+          .select(`
+            id,
+            assignment_id,
+            student_id,
+            submission_link,
+            comment,
+            status,
+            submitted_at,
+            updated_at,
+            assignments (
+              id,
+              title,
+              points,
+              due_date,
+              class_id
+            ),
+            users:student_id (
+              id,
+              name,
+              email,
+              avatar,
+              student_id
+            )
+          `)
+          .in('assignment_id', assignmentIds)
+          .order('submitted_at', { ascending: false })
 
-    return (data || []).map((sub) => {
-      const parsed = this.parseSubmissionComment(sub.comment)
-      return {
-        ...sub,
-        parsedComment: parsed,
-        grade: parsed.grade,
-        feedback: parsed.feedback,
-        studentNote: parsed.text,
-      }
-    })
+        if (error) {
+          console.error('[submissionsService] Error fetching class submissions:', error)
+          throw error
+        }
+
+        return (data || []).map((sub) => {
+          const parsed = this.parseSubmissionComment(sub.comment)
+          return {
+            ...sub,
+            parsedComment: parsed,
+            grade: parsed.grade,
+            feedback: parsed.feedback,
+            studentNote: parsed.text,
+          }
+        })
+      },
+      { ttlMs: 30000, forceRefresh }
+    )
   },
 }

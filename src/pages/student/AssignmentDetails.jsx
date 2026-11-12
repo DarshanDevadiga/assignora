@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -35,10 +35,11 @@ import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
 import Modal from '../../components/common/Modal'
 import { Input, Textarea } from '../../components/common/Input'
-import TwoStepSubmissionModal from '../../components/student/TwoStepSubmissionModal'
-import GroupManagementModal from '../../components/group/GroupManagementModal'
-import SubmittedWorkViewerModal from '../../components/submission/SubmittedWorkViewerModal'
 import GroupSubmissionCard from '../../components/submission/GroupSubmissionCard'
+
+const TwoStepSubmissionModal = lazy(() => import('../../components/student/TwoStepSubmissionModal'))
+const GroupManagementModal = lazy(() => import('../../components/group/GroupManagementModal'))
+const SubmittedWorkViewerModal = lazy(() => import('../../components/submission/SubmittedWorkViewerModal'))
 
 export default function AssignmentDetails() {
   const { id: assignmentId } = useParams()
@@ -1076,30 +1077,36 @@ export default function AssignmentDetails() {
       </div>
 
       {/* Two Step Confirmation Modal (Individual) */}
-      <TwoStepSubmissionModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        assignment={assignment}
-        submissionData={{ submissionLink, comment }}
-        onFinalSubmit={handleFinalSubmit}
-        onSuccessDone={() => loadAssignmentAndSubmission()}
-      />
+      {isModalOpen && (
+        <Suspense fallback={null}>
+          <TwoStepSubmissionModal
+            isOpen={isModalOpen}
+            onClose={() => setIsModalOpen(false)}
+            assignment={assignment}
+            submissionData={{ submissionLink, comment }}
+            onFinalSubmit={handleFinalSubmit}
+            onSuccessDone={() => loadAssignmentAndSubmission()}
+          />
+        </Suspense>
+      )}
 
       {/* Group Management Modal */}
-      {isGroup && (
-        <GroupManagementModal
-          isOpen={isGroupModalOpen}
-          onClose={() => setIsGroupModalOpen(false)}
-          classId={assignment?.class_id}
-          className={assignment?.classes?.name}
-          currentUser={user}
-          currentGroup={studentGroup}
-          initialTab={groupModalInitialTab}
-          onGroupUpdated={(updatedGroup) => {
-            setStudentGroup(updatedGroup)
-            loadAssignmentAndSubmission()
-          }}
-        />
+      {isGroup && isGroupModalOpen && (
+        <Suspense fallback={null}>
+          <GroupManagementModal
+            isOpen={isGroupModalOpen}
+            onClose={() => setIsGroupModalOpen(false)}
+            classId={assignment?.class_id}
+            className={assignment?.classes?.name}
+            currentUser={user}
+            currentGroup={studentGroup}
+            initialTab={groupModalInitialTab}
+            onGroupUpdated={(updatedGroup) => {
+              setStudentGroup(updatedGroup)
+              loadAssignmentAndSubmission()
+            }}
+          />
+        </Suspense>
       )}
 
       {/* Group Leader Submission Confirmation Modal */}
@@ -1163,26 +1170,30 @@ export default function AssignmentDetails() {
       )}
 
       {/* Dedicated Submitted Work Viewer Modal for Student Inspection */}
-      <SubmittedWorkViewerModal
-        isOpen={isViewerOpen}
-        onClose={() => setIsViewerOpen(false)}
-        data={{
-          assignment,
-          group: studentGroup
-            ? { ...studentGroup, leaderName: studentGroup.leader?.name || user?.name }
-            : null,
-          student: user,
-          submission: {
-            ...((assignment?.submission_type === 'group' ? groupSubmission : submission) || {}),
-            acknowledged_by_name:
-              groupSubmission?.leader?.name ||
-              groupSubmission?.leader_name ||
-              studentGroup?.leader?.name ||
-              user?.name,
-          },
-          isGroup: assignment?.submission_type === 'group',
-        }}
-      />
+      {isViewerOpen && (
+        <Suspense fallback={null}>
+          <SubmittedWorkViewerModal
+            isOpen={isViewerOpen}
+            onClose={() => setIsViewerOpen(false)}
+            data={{
+              assignment,
+              group: studentGroup
+                ? { ...studentGroup, leaderName: studentGroup.leader?.name || user?.name }
+                : null,
+              student: user,
+              submission: {
+                ...((assignment?.submission_type === 'group' ? groupSubmission : submission) || {}),
+                acknowledged_by_name:
+                  groupSubmission?.leader?.name ||
+                  groupSubmission?.leader_name ||
+                  studentGroup?.leader?.name ||
+                  user?.name,
+              },
+              isGroup: assignment?.submission_type === 'group',
+            }}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback, lazy, Suspense } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BookOpen,
@@ -57,10 +57,11 @@ import Badge from '../../components/common/Badge'
 import Modal from '../../components/common/Modal'
 import { Input, Textarea } from '../../components/common/Input'
 import NotificationBadge from '../../components/common/NotificationBadge'
-import InviteStudentModal from '../../components/class/InviteStudentModal'
-import StudentProfileModal from '../../components/class/StudentProfileModal'
-import TwoStepSubmissionModal from '../../components/student/TwoStepSubmissionModal'
-import ClassGroupsTab from '../../components/class/ClassGroupsTab'
+
+const InviteStudentModal = lazy(() => import('../../components/class/InviteStudentModal'))
+const StudentProfileModal = lazy(() => import('../../components/class/StudentProfileModal'))
+const TwoStepSubmissionModal = lazy(() => import('../../components/student/TwoStepSubmissionModal'))
+const ClassGroupsTab = lazy(() => import('../../components/class/ClassGroupsTab'))
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: BookOpen },
@@ -152,6 +153,8 @@ export default function ClassDetailPage() {
     activeTabRef.current = activeTab
   }, [activeTab])
 
+  const messagesLoadedForClassRef = useRef(null)
+
   // Resolve sender metadata (name, role, avatar) accurately from class roster and teacher info
   const resolveSenderProfile = useCallback((senderId) => {
     if (!senderId) return { name: 'Member', role: 'student', avatar: null }
@@ -233,13 +236,13 @@ export default function ClassDetailPage() {
 
         setCurrentClass(cls)
 
-        // 2. Fetch class sub-resources in parallel for maximum speed & resilience
-        const [subsRes, annRes, actsRes, resRes, msgsRes, rosterRes] = await Promise.allSettled([
-          submissionsService.getClassSubmissions(classId),
+        // 2. Fetch non-redundant sub-resources in parallel (reuse assignmentIds, defer class messages until Messages tab opens)
+        const assignmentIds = (cls.assignments || []).map((a) => a.id).filter(Boolean)
+        const shouldLoadMessages = activeTabRef.current === 'messages'
+        const [subsRes, annRes, msgsRes, rosterRes] = await Promise.allSettled([
+          submissionsService.getClassSubmissions(classId, assignmentIds),
           announcementsService.getClassAnnouncements(classId),
-          classesService.getClassActivity(classId),
-          classesService.getClassResources(classId),
-          messagesService.getClassMessages(classId),
+          shouldLoadMessages ? messagesService.getClassMessages(classId) : Promise.resolve(null),
           classesService.getClassRoster(classId),
         ])
 
@@ -249,34 +252,42 @@ export default function ClassDetailPage() {
           setClassRoster(rosterRes.value)
         }
 
+        const resolvedSubs = subsRes.status === 'fulfilled' ? (subsRes.value || []) : []
         if (subsRes.status === 'fulfilled') {
-          setSubmissions(subsRes.value || [])
+          setSubmissions(resolvedSubs)
         } else {
           console.warn('[ClassDetailPage] Could not load submissions:', subsRes.reason)
         }
 
+        const resolvedAnns = annRes.status === 'fulfilled' ? (annRes.value || []) : []
         if (annRes.status === 'fulfilled') {
-          setAnnouncements(annRes.value || [])
+          setAnnouncements(resolvedAnns)
         } else {
           console.warn('[ClassDetailPage] Could not load announcements:', annRes.reason)
         }
 
-        if (actsRes.status === 'fulfilled') {
-          setActivities(actsRes.value || [])
-        } else {
-          console.warn('[ClassDetailPage] Could not load activities:', actsRes.reason)
+        if (shouldLoadMessages) {
+          messagesLoadedForClassRef.current = classId
+          if (msgsRes.status === 'fulfilled' && Array.isArray(msgsRes.value)) {
+            setMessages((prev) => mergeMessages(prev, msgsRes.value))
+          } else if (msgsRes.status === 'rejected') {
+            console.warn('[ClassDetailPage] Could not load messages:', msgsRes.reason)
+          }
         }
 
-        if (resRes.status === 'fulfilled') {
-          setResources(resRes.value || [])
-        } else {
-          console.warn('[ClassDetailPage] Could not load resources:', resRes.reason)
-        }
-
-        if (msgsRes.status === 'fulfilled') {
-          setMessages((prev) => mergeMessages(prev, msgsRes.value || []))
-        } else {
-          console.warn('[ClassDetailPage] Could not load messages:', msgsRes.reason)
+        // Compute activity timeline & resources purely in-memory from fetched payloads (zero redundant DB calls)
+        const [acts, res] = await Promise.all([
+          classesService.getClassActivity(classId, {
+            members: cls.class_members || [],
+            announcements: resolvedAnns,
+            assignments: cls.assignments || [],
+            submissions: resolvedSubs,
+          }),
+          classesService.getClassResources(classId, cls),
+        ])
+        if (!isCancelled) {
+          setActivities(acts || [])
+          setResources(res || [])
         }
 
         const prevRead = messagesService.getLastReadTimestamp(classId, user.id)
@@ -299,6 +310,32 @@ export default function ClassDetailPage() {
       isCancelled = true
     }
   }, [classId, user?.id, isTeacher, refreshTrigger])
+
+  // Lazy-load class discussion history the first time user opens the Messages tab
+  useEffect(() => {
+    if (activeTab !== 'messages' || !classId || !user?.id) return
+    if (messagesLoadedForClassRef.current === classId) return
+
+    let cancelled = false
+    messagesLoadedForClassRef.current = classId
+    messagesService
+      .getClassMessages(classId)
+      .then((loadedMsgs) => {
+        if (!cancelled && Array.isArray(loadedMsgs)) {
+          setMessages((prev) => mergeMessages(prev, loadedMsgs))
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          messagesLoadedForClassRef.current = null
+          console.warn('[ClassDetailPage] Could not load messages:', err)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, classId, user?.id])
 
   // Clear unread badge whenever user opens or is on messages tab
   useEffect(() => {
@@ -417,13 +454,19 @@ export default function ClassDetailPage() {
       await classesService.removeMember(studentToRemove.id)
 
       // Update state immediately
+      const updatedMembers = currentClass?.class_members?.filter((m) => m.id !== studentToRemove.id) || []
       setCurrentClass((prev) => ({
         ...prev,
         class_members: prev.class_members.filter((m) => m.id !== studentToRemove.id),
       }))
 
-      // Reload activities
-      const acts = await classesService.getClassActivity(classId)
+      // Reload activities in-memory
+      const acts = await classesService.getClassActivity(classId, {
+        members: updatedMembers,
+        announcements,
+        assignments: currentClass?.assignments || [],
+        submissions,
+      })
       setActivities(acts)
 
       setStudentToRemove(null)
@@ -449,12 +492,18 @@ export default function ClassDetailPage() {
         admin_id: user.id,
       })
 
-      setAnnouncements([created, ...announcements])
+      const nextAnnouncements = [created, ...announcements]
+      setAnnouncements(nextAnnouncements)
       setAnnouncementTitle('')
       setAnnouncementMsg('')
 
-      // Refresh activity timeline
-      const acts = await classesService.getClassActivity(classId)
+      // Refresh activity timeline in-memory
+      const acts = await classesService.getClassActivity(classId, {
+        members: currentClass?.class_members || [],
+        announcements: nextAnnouncements,
+        assignments: currentClass?.assignments || [],
+        submissions,
+      })
       setActivities(acts)
 
       // Notify class members in real-time
@@ -487,12 +536,18 @@ export default function ClassDetailPage() {
       })
 
       // Update local submissions state
-      setSubmissions((prev) =>
-        prev.map((s) => (s.id === gradingSubmission.id ? { ...s, ...updated, grade: Number(gradeScore), feedback: gradeFeedback.trim() } : s))
+      const nextSubmissions = submissions.map((s) =>
+        s.id === gradingSubmission.id ? { ...s, ...updated, grade: Number(gradeScore), feedback: gradeFeedback.trim() } : s
       )
+      setSubmissions(nextSubmissions)
 
-      // Refresh activity
-      const acts = await classesService.getClassActivity(classId)
+      // Refresh activity in-memory
+      const acts = await classesService.getClassActivity(classId, {
+        members: currentClass?.class_members || [],
+        announcements,
+        assignments: currentClass?.assignments || [],
+        submissions: nextSubmissions,
+      })
       setActivities(acts)
 
       // Notify the student that their submission has been graded
@@ -862,7 +917,7 @@ export default function ClassDetailPage() {
               <div className="flex items-center gap-3.5">
                 <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-brand-primary to-brand-hover text-white flex items-center justify-center font-bold text-base shadow-purple-glow">
                   {currentClass.users?.avatar ? (
-                    <img src={currentClass.users.avatar} alt={currentClass.users?.name || 'Instructor'} className="w-full h-full object-cover rounded-2xl" />
+                    <img src={currentClass.users.avatar} alt={currentClass.users?.name || 'Instructor'} loading="lazy" decoding="async" className="w-full h-full object-cover rounded-2xl" />
                   ) : (
                     <span>{currentClass.users?.name?.charAt(0) || 'P'}</span>
                   )}
@@ -975,7 +1030,7 @@ export default function ClassDetailPage() {
                           <div className="flex items-center gap-3">
                             <div className="w-9 h-9 rounded-full bg-brand-light text-brand-primary flex items-center justify-center font-bold text-sm ring-2 ring-brand-border/60 overflow-hidden shrink-0">
                               {msg.senderAvatar ? (
-                                <img src={msg.senderAvatar} alt={msg.senderName} className="w-full h-full object-cover" />
+                                <img src={msg.senderAvatar} alt={msg.senderName} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                               ) : (
                                 <span>{msg.senderName?.charAt(0) || 'U'}</span>
                               )}
@@ -1478,6 +1533,8 @@ export default function ClassDetailPage() {
                     <img
                       src={classRoster.instructor?.avatar || currentClass.users?.avatar}
                       alt="Teacher"
+                      loading="lazy"
+                      decoding="async"
                       className="w-full h-full object-cover rounded-full"
                     />
                   ) : (
@@ -1596,7 +1653,7 @@ export default function ClassDetailPage() {
                       <div className="flex items-center gap-3.5 min-w-0">
                         <div className="w-10 h-10 rounded-full bg-slate-100 text-brand-heading flex items-center justify-center font-bold text-sm ring-2 ring-brand-border/60 overflow-hidden shrink-0">
                           {studentAvatar ? (
-                            <img src={studentAvatar} alt={studentName} className="w-full h-full object-cover" />
+                            <img src={studentAvatar} alt={studentName} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                           ) : (
                             <span>{studentName.charAt(0) || 'S'}</span>
                           )}
@@ -1719,13 +1776,21 @@ export default function ClassDetailPage() {
           TAB 8: GROUPS (Class-scoped Group Management)
       ========================================================================= */}
       {activeTab === 'groups' && (
-        <ClassGroupsTab
-          classId={classId}
-          className={currentClass?.name || 'Course'}
-          currentUser={user}
-          isTeacher={isTeacher}
-          onGroupChanged={refreshClassDetails}
-        />
+        <Suspense
+          fallback={
+            <div className="py-12 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-full border-4 border-brand-light border-t-brand-primary animate-spin" />
+            </div>
+          }
+        >
+          <ClassGroupsTab
+            classId={classId}
+            className={currentClass?.name || 'Course'}
+            currentUser={user}
+            isTeacher={isTeacher}
+            onGroupChanged={refreshClassDetails}
+          />
+        </Suspense>
       )}
 
       {/* =========================================================================
@@ -1733,18 +1798,26 @@ export default function ClassDetailPage() {
       ========================================================================= */}
 
       {/* 1. Invite Students Dialog */}
-      <InviteStudentModal
-        isOpen={isInviteOpen}
-        onClose={() => setIsInviteOpen(false)}
-        currentClass={currentClass}
-      />
+      {isInviteOpen && (
+        <Suspense fallback={null}>
+          <InviteStudentModal
+            isOpen={isInviteOpen}
+            onClose={() => setIsInviteOpen(false)}
+            currentClass={currentClass}
+          />
+        </Suspense>
+      )}
 
       {/* 2. View Student Profile Modal */}
-      <StudentProfileModal
-        isOpen={Boolean(selectedStudentForProfile)}
-        onClose={() => setSelectedStudentForProfile(null)}
-        member={selectedStudentForProfile}
-      />
+      {Boolean(selectedStudentForProfile) && (
+        <Suspense fallback={null}>
+          <StudentProfileModal
+            isOpen={Boolean(selectedStudentForProfile)}
+            onClose={() => setSelectedStudentForProfile(null)}
+            member={selectedStudentForProfile}
+          />
+        </Suspense>
+      )}
 
       {/* 3. Confirmation Dialog for Removing a Student */}
       <Modal
@@ -1869,24 +1942,26 @@ export default function ClassDetailPage() {
 
       {/* 5. Student Submit Assignment Modal */}
       {submittingAssignment && (
-        <TwoStepSubmissionModal
-          isOpen={Boolean(submittingAssignment)}
-          onClose={() => setSubmittingAssignment(null)}
-          assignment={submittingAssignment}
-          onFinalSubmit={async () => {
-            if (!submittingAssignment?.id || !user?.id) return null
-            return await submissionsService.submitAssignment({
-              assignmentId: submittingAssignment.id,
-              studentId: user.id,
-              submissionLink: '',
-              comment: 'Submitted from Class Coursework',
-            })
-          }}
-          onSuccessDone={() => {
-            setSubmittingAssignment(null)
-            refreshClassDetails()
-          }}
-        />
+        <Suspense fallback={null}>
+          <TwoStepSubmissionModal
+            isOpen={Boolean(submittingAssignment)}
+            onClose={() => setSubmittingAssignment(null)}
+            assignment={submittingAssignment}
+            onFinalSubmit={async () => {
+              if (!submittingAssignment?.id || !user?.id) return null
+              return await submissionsService.submitAssignment({
+                assignmentId: submittingAssignment.id,
+                studentId: user.id,
+                submissionLink: '',
+                comment: 'Submitted from Class Coursework',
+              })
+            }}
+            onSuccessDone={() => {
+              setSubmittingAssignment(null)
+              refreshClassDetails()
+            }}
+          />
+        </Suspense>
       )}
 
       {/* 6. Teacher Add Resource Modal */}

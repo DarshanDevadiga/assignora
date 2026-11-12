@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Users,
@@ -34,18 +34,29 @@ import Modal from '../../components/common/Modal'
 import { Input, Textarea } from '../../components/common/Input'
 import NotificationBadge from '../../components/common/NotificationBadge'
 import { useNotifications } from '../../context/NotificationContext'
+import { getCached } from '../../utils/dataCache'
 
 export default function AdminDashboard() {
   const { user } = useAuth()
   const { classUnreadCounts = {} } = useNotifications()
   const navigate = useNavigate()
 
+  const cachedClasses = user?.id ? getCached(`adminClasses:${user.id}`, { allowStale: true }) : null
+  const cachedAssignments = user?.id ? getCached(`adminAssignments:${user.id}`, { allowStale: true }) : null
+  const cachedAllAnnouncements = getCached('announcements:all', { allowStale: true })
+  const hasWarmSnapshot = Boolean(cachedClasses && cachedAssignments)
+
   // State
-  const [classes, setClasses] = useState([])
-  const [selectedClass, setSelectedClass] = useState(null)
-  const [assignments, setAssignments] = useState([])
-  const [announcements, setAnnouncements] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [classes, setClasses] = useState(() => cachedClasses || [])
+  const [selectedClass, setSelectedClass] = useState(() => (cachedClasses && cachedClasses.length > 0 ? cachedClasses[0] : null))
+  const [assignments, setAssignments] = useState(() => cachedAssignments || [])
+  const [announcements, setAnnouncements] = useState(() => {
+    if (cachedAllAnnouncements && cachedClasses && cachedClasses.length > 0) {
+      return cachedAllAnnouncements.filter((a) => a.class_id === cachedClasses[0].id)
+    }
+    return []
+  })
+  const [loading, setLoading] = useState(() => !hasWarmSnapshot)
   const [activeTab, setActiveTab] = useState('stream')
 
   // Announcement posting state
@@ -76,21 +87,16 @@ export default function AdminDashboard() {
   const [creatingClass, setCreatingClass] = useState(false)
 
   // State for all announcements to enable instant class switching without network round-trips
-  const [allAnnouncementsCache, setAllAnnouncementsCache] = useState([])
+  const [allAnnouncementsCache, setAllAnnouncementsCache] = useState(() => cachedAllAnnouncements || [])
 
-  // Fetch initial dashboard data
-  useEffect(() => {
-    loadDashboardData()
-  }, [user?.id])
-
-  async function loadDashboardData() {
+  const loadDashboardData = useCallback(async ({ force = false, silent = false } = {}) => {
     if (!user?.id) return
     try {
-      setLoading(true)
+      if (!silent) setLoading(true)
       const [fetchedClasses, fetchedAssignments, fetchedAnnouncements] = await Promise.all([
-        classesService.getAdminClasses(user.id),
-        assignmentsService.getAdminAssignments(user.id),
-        announcementsService.getAnnouncements().catch(() => []),
+        classesService.getAdminClasses(user.id, force),
+        assignmentsService.getAdminAssignments(user.id, force),
+        announcementsService.getAnnouncements(force).catch(() => []),
       ])
 
       setClasses(fetchedClasses)
@@ -98,9 +104,11 @@ export default function AdminDashboard() {
       setAllAnnouncementsCache(fetchedAnnouncements)
 
       if (fetchedClasses.length > 0) {
-        const active = fetchedClasses[0]
-        setSelectedClass(active)
-        setAnnouncements(fetchedAnnouncements.filter((a) => a.class_id === active.id))
+        setSelectedClass((prev) => {
+          const active = prev ? fetchedClasses.find((c) => c.id === prev.id) || fetchedClasses[0] : fetchedClasses[0]
+          setAnnouncements(fetchedAnnouncements.filter((a) => a.class_id === active.id))
+          return active
+        })
       } else {
         setSelectedClass(null)
         setAnnouncements([])
@@ -110,13 +118,38 @@ export default function AdminDashboard() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [user?.id])
+
+  // Fetch initial dashboard data (with synchronous SWR hydration)
+  useEffect(() => {
+    if (!user?.id) return
+    const freshClasses = getCached(`adminClasses:${user.id}`)
+    const freshAssignments = getCached(`adminAssignments:${user.id}`)
+    const freshAnns = getCached('announcements:all')
+    if (freshClasses && freshAssignments && freshAnns) {
+      setClasses(freshClasses)
+      setAssignments(freshAssignments)
+      setAllAnnouncementsCache(freshAnns)
+      const active = freshClasses[0] || null
+      setSelectedClass(active)
+      setAnnouncements(active ? freshAnns.filter((a) => a.class_id === active.id) : [])
+      setLoading(false)
+      return
+    }
+    const staleClasses = getCached(`adminClasses:${user.id}`, { allowStale: true })
+    const staleAssignments = getCached(`adminAssignments:${user.id}`, { allowStale: true })
+    if (staleClasses && staleAssignments) {
+      loadDashboardData({ force: false, silent: true })
+    } else {
+      loadDashboardData()
+    }
+  }, [user?.id, loadDashboardData])
 
   // Handle active class change with instantaneous in-memory filter
-  const handleSelectClass = (cls) => {
+  const handleSelectClass = useCallback((cls) => {
     setSelectedClass(cls)
     setAnnouncements(allAnnouncementsCache.filter((a) => a.class_id === cls.id))
-  }
+  }, [allAnnouncementsCache])
 
   // Post announcement
   const handlePostAnnouncement = async (e) => {
@@ -158,7 +191,7 @@ export default function AdminDashboard() {
       setNewClassName('')
       setNewClassSubject('')
       setNewClassDescription('')
-      await loadDashboardData()
+      await loadDashboardData({ force: true })
     } catch (err) {
       console.error('[AdminDashboard] Error creating class:', err)
     } finally {
@@ -166,64 +199,80 @@ export default function AdminDashboard() {
     }
   }
 
-  // Aggregate statistics across admin classes and assignments
+  // Aggregate statistics across admin classes and assignments (memoized)
   const totalClassesCount = classes.length
   const totalAssignmentsCount = assignments.length
 
-  // Calculate total submissions and eligible student assignments accurately
-  let totalSubmissionsCount = 0
-  let totalAllocatedSlots = 0
+  const { totalSubmissionsCount, avgCompletionRate } = useMemo(() => {
+    const classMembersById = new Map(classes.map((c) => [c.id, c.class_members || []]))
+    let subsCount = 0
+    let allocatedSlots = 0
 
-  assignments.forEach((a) => {
-    const classMembers = a.classes?.class_members || classes.find((c) => c.id === a.class_id)?.class_members || []
-    const eligibleStudentIds = a.assign_to_all
-      ? classMembers.map((m) => m.student_id).filter(Boolean)
-      : (a.assignment_students || []).map((s) => s.student_id).filter(Boolean)
+    assignments.forEach((a) => {
+      const classMembers = a.classes?.class_members || classMembersById.get(a.class_id) || []
+      const eligibleSet = new Set(
+        a.assign_to_all
+          ? classMembers.map((m) => m.student_id).filter(Boolean)
+          : (a.assignment_students || []).map((s) => s.student_id).filter(Boolean)
+      )
 
-    const validSubmittedStudentIds = new Set()
-    ;(a.submissions || []).forEach((sub) => {
-      if (
-        sub?.student_id &&
-        eligibleStudentIds.includes(sub.student_id) &&
-        ['submitted', 'reviewed'].includes(sub.status)
-      ) {
-        validSubmittedStudentIds.add(sub.student_id)
-      }
+      const validSubmittedStudentIds = new Set()
+      ;(a.submissions || []).forEach((sub) => {
+        if (
+          sub?.student_id &&
+          eligibleSet.has(sub.student_id) &&
+          ['submitted', 'reviewed'].includes(sub.status)
+        ) {
+          validSubmittedStudentIds.add(sub.student_id)
+        }
+      })
+
+      subsCount += validSubmittedStudentIds.size
+      allocatedSlots += eligibleSet.size
     })
 
-    totalSubmissionsCount += validSubmittedStudentIds.size
-    totalAllocatedSlots += eligibleStudentIds.length
-  })
+    return {
+      totalSubmissionsCount: subsCount,
+      avgCompletionRate: calculateCompletionRate(subsCount, allocatedSlots),
+    }
+  }, [assignments, classes])
 
-  const avgCompletionRate = calculateCompletionRate(totalSubmissionsCount, totalAllocatedSlots)
-
-  // Current class specific stats
+  // Current class specific stats (memoized)
   const currentClassStudentsCount = selectedClass?.class_members?.length || 0
-  const currentClassAssignments = assignments.filter((a) => a.class_id === selectedClass?.id)
+  const { currentClassAssignments, classSubmissionsCount, currentClassCompletion } = useMemo(() => {
+    const classAssignments = assignments.filter((a) => a.class_id === selectedClass?.id)
+    let subsCount = 0
+    let classAllocatedSlots = 0
 
-  let classSubmissionsCount = 0
-  let classAllocatedSlots = 0
-  currentClassAssignments.forEach((a) => {
-    const classMembers = a.classes?.class_members || selectedClass?.class_members || []
-    const eligibleStudentIds = a.assign_to_all
-      ? classMembers.map((m) => m.student_id).filter(Boolean)
-      : (a.assignment_students || []).map((s) => s.student_id).filter(Boolean)
+    classAssignments.forEach((a) => {
+      const classMembers = a.classes?.class_members || selectedClass?.class_members || []
+      const eligibleSet = new Set(
+        a.assign_to_all
+          ? classMembers.map((m) => m.student_id).filter(Boolean)
+          : (a.assignment_students || []).map((s) => s.student_id).filter(Boolean)
+      )
 
-    const validSubmittedStudentIds = new Set()
-    ;(a.submissions || []).forEach((sub) => {
-      if (
-        sub?.student_id &&
-        eligibleStudentIds.includes(sub.student_id) &&
-        ['submitted', 'reviewed'].includes(sub.status)
-      ) {
-        validSubmittedStudentIds.add(sub.student_id)
-      }
+      const validSubmittedStudentIds = new Set()
+      ;(a.submissions || []).forEach((sub) => {
+        if (
+          sub?.student_id &&
+          eligibleSet.has(sub.student_id) &&
+          ['submitted', 'reviewed'].includes(sub.status)
+        ) {
+          validSubmittedStudentIds.add(sub.student_id)
+        }
+      })
+
+      subsCount += validSubmittedStudentIds.size
+      classAllocatedSlots += eligibleSet.size
     })
 
-    classSubmissionsCount += validSubmittedStudentIds.size
-    classAllocatedSlots += eligibleStudentIds.length
-  })
-  const currentClassCompletion = calculateCompletionRate(classSubmissionsCount, classAllocatedSlots)
+    return {
+      currentClassAssignments: classAssignments,
+      classSubmissionsCount: subsCount,
+      currentClassCompletion: calculateCompletionRate(subsCount, classAllocatedSlots),
+    }
+  }, [assignments, selectedClass])
 
   // Upcoming assignments sorted by due date
   const upcomingAssignments = [...assignments]

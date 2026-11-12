@@ -50,19 +50,26 @@ export default function GradesGradebook() {
     }
   }
 
-  const currentClass = classes.find((c) => c.id === selectedClassId)
-  const classAssignments = assignments.filter((a) => a.class_id === selectedClassId)
-  const enrolledStudents = currentClass?.class_members?.map((m) => m.users).filter(Boolean) || []
+  const currentClass = useMemo(() => classes.find((c) => c.id === selectedClassId), [classes, selectedClassId])
+  const classAssignments = useMemo(() => assignments.filter((a) => a.class_id === selectedClassId), [assignments, selectedClassId])
+  const enrolledStudents = useMemo(() => currentClass?.class_members?.map((m) => m.users).filter(Boolean) || [], [currentClass])
 
-  // Calculate scores and letters per student
+  // Calculate scores and letters per student using O(1) submission lookup Maps
   const studentGrades = useMemo(() => {
+    const submissionMapsByAssignment = new Map(
+      classAssignments.map((a) => [
+        a.id,
+        new Map((a.submissions || []).filter((s) => s?.student_id).map((s) => [s.student_id, s])),
+      ])
+    )
+
     return enrolledStudents.map((student, idx) => {
       let totalEarned = 0
       let totalPossible = 0
       const scores = {}
 
       classAssignments.forEach((assignment) => {
-        const sub = assignment.submissions?.find((s) => s.student_id === student.id)
+        const sub = submissionMapsByAssignment.get(assignment.id)?.get(student.id)
         const pts = Number(assignment.points) || 100
         totalPossible += pts
         if (sub) {
@@ -108,14 +115,16 @@ export default function GradesGradebook() {
     )
   }, [studentGrades, searchQuery])
 
-  // Class completion rate
-  let totalSubmissions = 0
-  let totalAllocated = 0
-  classAssignments.forEach((a) => {
-    totalSubmissions += a.submissions?.length || 0
-    totalAllocated += enrolledStudents.length
-  })
-  const classAvgCompletion = calculateCompletionRate(totalSubmissions, totalAllocated)
+  // Class completion rate (memoized)
+  const classAvgCompletion = useMemo(() => {
+    let totalSubmissions = 0
+    let totalAllocated = 0
+    classAssignments.forEach((a) => {
+      totalSubmissions += a.submissions?.length || 0
+      totalAllocated += enrolledStudents.length
+    })
+    return calculateCompletionRate(totalSubmissions, totalAllocated)
+  }, [classAssignments, enrolledStudents.length])
 
   // Export Grades handler
   const handleExportGrades = () => {

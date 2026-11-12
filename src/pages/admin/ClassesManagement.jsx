@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus,
@@ -20,16 +20,17 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { classesService } from '../../services/classes.service'
-import { supabase } from '../../lib/supabase'
+import { getCached } from '../../utils/dataCache'
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
 import Modal from '../../components/common/Modal'
 import { Input, Textarea } from '../../components/common/Input'
-import InviteStudentModal from '../../components/class/InviteStudentModal'
-import JoinClassModal from '../../components/class/JoinClassModal'
 import NotificationBadge from '../../components/common/NotificationBadge'
 import { useNotifications } from '../../context/NotificationContext'
+
+const InviteStudentModal = lazy(() => import('../../components/class/InviteStudentModal'))
+const JoinClassModal = lazy(() => import('../../components/class/JoinClassModal'))
 
 const THEMES = [
   {
@@ -59,8 +60,11 @@ export default function ClassesManagement() {
   const { classUnreadCounts = {} } = useNotifications()
   const navigate = useNavigate()
 
-  const [classes, setClasses] = useState([])
-  const [loading, setLoading] = useState(true)
+  const cacheKey = user?.id ? `${user.role === 'admin' ? 'adminClasses' : 'studentClasses'}:${user.id}` : null
+  const initialClasses = cacheKey ? getCached(cacheKey, { allowStale: true }) : null
+
+  const [classes, setClasses] = useState(() => initialClasses || [])
+  const [loading, setLoading] = useState(() => !initialClasses)
 
   // Create Modal State
   const [isCreateOpen, setIsCreateOpen] = useState(false)
@@ -100,39 +104,39 @@ export default function ClassesManagement() {
 
   const isTeacher = user?.role === 'admin'
 
-  useEffect(() => {
-    loadClasses()
-  }, [user?.id, user?.role])
-
-  async function loadClasses() {
+  const loadClasses = useCallback(async ({ force = false, silent = false } = {}) => {
     if (!user?.id) return
     try {
-      setLoading(true)
-      if (user.role === 'admin') {
-        const data = await classesService.getAdminClasses(user.id)
-        setClasses(data)
-      } else {
-        const { data: memberRows } = await supabase
-          .from('class_members')
-          .select(`
-            class_id,
-            classes (
-              *,
-              class_members (id, student_id),
-              assignments (id, title, status, due_date, due_time, points)
-            )
-          `)
-          .eq('student_id', user.id)
-
-        const studentClasses = memberRows?.map((m) => m.classes).filter(Boolean) || []
-        setClasses(studentClasses)
-      }
+      if (!silent) setLoading(true)
+      const data = user.role === 'admin'
+        ? await classesService.getAdminClasses(user.id, force)
+        : await classesService.getStudentClasses(user.id, force)
+      setClasses(data)
     } catch (err) {
       console.error('[ClassesManagement] Error loading classes:', err)
     } finally {
       setLoading(false)
     }
-  }
+  }, [user?.id, user?.role])
+
+  useEffect(() => {
+    if (!user?.id) return
+    const key = `${user.role === 'admin' ? 'adminClasses' : 'studentClasses'}:${user.id}`
+    const fresh = getCached(key)
+    if (fresh) {
+      setClasses(fresh)
+      setLoading(false)
+      return
+    }
+    const stale = getCached(key, { allowStale: true })
+    if (stale) {
+      setClasses(stale)
+      setLoading(false)
+      loadClasses({ force: false, silent: true })
+    } else {
+      loadClasses()
+    }
+  }, [user?.id, user?.role, loadClasses])
 
   // Create Class
   const handleCreateSubmit = async (e) => {
@@ -546,18 +550,26 @@ export default function ClassesManagement() {
       </Modal>
 
       {/* Modal: Invite Students */}
-      <InviteStudentModal
-        isOpen={Boolean(inviteModalClass)}
-        onClose={() => setInviteModalClass(null)}
-        currentClass={inviteModalClass}
-      />
+      {Boolean(inviteModalClass) && (
+        <Suspense fallback={null}>
+          <InviteStudentModal
+            isOpen={Boolean(inviteModalClass)}
+            onClose={() => setInviteModalClass(null)}
+            currentClass={inviteModalClass}
+          />
+        </Suspense>
+      )}
 
       {/* Modal: Student Join Class */}
-      <JoinClassModal
-        isOpen={isJoinModalOpen}
-        onClose={() => setIsJoinModalOpen(false)}
-        onEnrolled={() => loadClasses()}
-      />
+      {isJoinModalOpen && (
+        <Suspense fallback={null}>
+          <JoinClassModal
+            isOpen={isJoinModalOpen}
+            onClose={() => setIsJoinModalOpen(false)}
+            onEnrolled={() => loadClasses({ force: true })}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }

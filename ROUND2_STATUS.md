@@ -5,7 +5,7 @@
 **Target Database:** `trkcagoxopabqerljgvn` (PostgreSQL 17.11 on Supabase ap-southeast-1)  
 **Production URL:** https://assignora-cyan.vercel.app/  
 **Repository:** https://github.com/DarshanDevadiga/assignora  
-**Last Updated:** 2026-11-11T22:50:00+05:30  
+**Last Updated:** 2026-11-12T08:03:00+05:30  
 
 ---
 
@@ -47,8 +47,9 @@
 | **Remove Quick Demo Accounts** | **PASS** | Removed Quick Demo Accounts section, buttons, and handlers from Login.jsx; balanced spacing; standard email/password auth preserved |
 | **Registration, Profiles & Class Enrollment RLS Fix** | **PASS** | Fixed 406 `.single()`, added profile auto-provisioning, fixed 403/RLS enrollment pipeline; SQL migration `20261111162141` live applied & verified |
 | **Global UI/UX, Modal Portal & Responsive Repair** | **PASS** | Refactored Modal & NotificationsDrawer to `document.body` portals via shared `overlayManager`, removed CSS `transform` trap on `.page-enter`, added Tailwind z-index scale, fixed dropdown clipping, unified responsive shell across 7 viewports |
-| **Group Messages Migration** | **PENDING APPROVAL** | `20261110000002_round2_group_messages.sql` prepared with RLS, rollback & verification; awaiting approval |
-| **Production Build Check** | **PASS** | `vite build` completed cleanly (2186 modules transformed, 0 errors, built in 7.05s) |
+| **Full Application Performance Optimization** | **PASS** | Route/modal/icon/confetti code-splitting (`index.js` 76.6→52.8 kB, `ClassDetailPage` 102.3→50.8 kB), hover/idle route prefetching, `dataCache` SWR + in-flight dedup, `Promise.all` parallelization & duplicate query elimination, memoized contexts/cards, lazy image decoding |
+| **Group Messages Migration** | **PASS** | `20261110000002_round2_group_messages.sql` live applied & verified (`public.group_messages` active with RLS; 7 objects in manifest) |
+| **Production Build Check** | **PASS** | `vite build` completed cleanly (2188 modules transformed, 0 errors, built in 8.85s) |
 
 ---
 
@@ -349,11 +350,28 @@
       - Fixed clipped 3-dot dropdown menus in `ClassesManagement.jsx`, added outside-click closing for `AdminDashboard.jsx` Create dropdown, standardized `max-w-7xl` widths across `GroupDetailsPage.jsx`, `AssignmentDetails.jsx`, and `AppRoutes.jsx`, and improved responsive stacking in `JoinClassModal.jsx`, `InviteStudentModal.jsx`, and `StudentProfileModal.jsx`.
     - **Verification**: Static suite `scripts/verify-global-ui-responsive-and-modals.js` passed 7/7 checks; headless Chrome E2E `scripts/verify-ui-browser-e2e.mjs` passed across all 7 viewports (`1920x1080`, `1440x900`, `1280x800`, `1024x768`, `768x1024`, `430x932`, `375x812`) for Student & Admin roles with 0 console errors and 0 uncaught page errors.
 
+25. **Complete Application Performance Optimization**:
+    - **Bundle Splitting & Prefetching**:
+      - Created `src/utils/routePrefetch.js` (`routeLoaders`, `prefetchRoute`, `prefetchRoleCoreRoutes`) for hover/focus/touch preloading in `Sidebar.jsx` & `MobileNav.jsx` and idle role-core route preloading after authentication.
+      - Lazy-loaded `DashboardLayout` (`15.86 kB`), `NotificationsDrawer` (`5.36 kB` on open), `ClassGroupsTab` (`55.01 kB`), and heavy sub-modals (`JoinClassModal`, `InviteStudentModal`, `StudentProfileModal`, `TwoStepSubmissionModal`, `AddGroupMembersModal`, `GroupManagementModal`, `StudentSelectionModal`, `SubmittedWorkViewerModal` on student side); dynamically imported `canvas-confetti` (`10.70 kB`) on submission success.
+      - Removed monolithic `icons` (`44.66 kB` global preload) & `confetti` manual chunks from `vite.config.js`; shrank `index.js` from `76.63 kB` (`21.79 kB` gzip) to `52.79 kB` (`16.72 kB` gzip) and `ClassDetailPage.js` from `102.31 kB` (`22.83 kB` gzip) to `50.82 kB` (`12.75 kB` gzip).
+    - **SWR Caching, Deduplication & Logout Isolation**:
+      - Created `src/utils/dataCache.js` (`getCached`, `setCached`, `fetchWithCache` with in-flight Promise deduplication, TTL expiry, prefix invalidation, and `subscribeCacheClear` logout purge).
+      - Added cached/deduplicated reads and mutation invalidations across `auth.service.js`, `classes.service.js`, `assignments.service.js`, `submissions.service.js`, `announcements.service.js`, `users.service.js`, `notifications.service.js`, and `groups.service.js`.
+      - Removed eager imports of `groupsService` and `messagesService` from `AuthContext.jsx` (using `clearAllAppCaches()` + dynamic `messagesService.cleanupRealtime()` import).
+    - **Supabase Waterfall Elimination & Query Slimming**:
+      - Narrowed `select('*')` payloads to explicit column projections (`auth.service.js`, `notifications.service.js` + `.limit(50)`, `assignments.service.js` + `getAdminAssignmentSummaries`).
+      - Reused parent-fetched `cls`, `announcements`, `submissions`, and `assignmentIds` in `ClassDetailPage.jsx` -> `classesService.getClassActivity()` / `getClassResources()` / `submissionsService.getClassSubmissions()`, and deferred `messagesService.getClassMessages()` until the Messages tab opens (`6366 ms, 15 reqs` -> `2511 ms, 7 reqs`).
+      - Joined `groups` inside `getStudentGroupInCourse`, batched `StudentsManagement.jsx` enrollment via `Promise.all`, parallelized secondary fetches in `StudentDashboard.jsx` & edit mode in `CreateAssignment.jsx`, switched 15s unread polling in `NotificationContext.jsx` to visibility-aware 45s polling.
+    - **React Render & Asset Optimization**:
+      - Wrapped `Sidebar`, `MobileNav`, `Header`, `StatCard`, `Badge`, and `GroupSubmissionCard` with `React.memo`; memoized context `value` objects in `AuthContext.jsx` & `NotificationContext.jsx`; replaced O(N*M) linear `.find()` scans with `Map` lookups inside `useMemo` (`AdminDashboard.jsx`, `GradesGradebook.jsx`, `SubmissionTracking.jsx`).
+      - Added `loading="lazy" decoding="async"` on below-the-fold user/preset avatars and reference icons (`Header`, `ClassDetailPage`, `SubmissionTracking`, `ProfilePage`, `SettingsPage`, `AddGroupMembersModal`, `ProfessorCreateGroupModal`, `StudentProfileModal`, `CreateAssignment`).
+
 ---
 
 ## 3. Database Migration Status
 
-- **Baseline & Advanced Migrations Status:** **LIVE APPLIED & FULLY VERIFIED** (57 objects recorded in `_assignora_migration_manifest`)
+- **Baseline, Advanced & Group Messages Migrations Status:** **LIVE APPLIED & FULLY VERIFIED** (`62` objects recorded in `_assignora_migration_manifest`: `50` baseline, `5` advanced roster/groups, `7` `group_messages`)
 - **Target DB:** `trkcagoxopabqerljgvn` (PostgreSQL 17.11 on AWS ap-southeast-1)
 - **Auth & Enrollment RLS Migration (`supabase/migrations/20261111000000_round2_fix_registration_profiles_and_enrollment_rls.sql`):** **LIVE APPLIED & VERIFIED** (Supabase migration version `20261111162141`, name `round2_fix_registration_profiles_and_enrollment_rls`)
   - Objects applied & verified: `public.handle_new_user()` + trigger `on_auth_user_created` on `auth.users`, orphaned `auth.users` backfill into `public.users` (`orphaned_users_count: 0`, `darshan@pim.ac.in` provisioned), `public.validate_faculty_invitation(text, text)`, `public.is_instructor_of_caller(uuid)`, RLS policies `users_insert_policy` & `users_instructors_select_policy` on `public.users`, updated `class_members_insert_policy` & `class_members_select_policy` on `public.class_members`, self-healing `public.join_class_by_code(text)`, and enhanced `public.get_class_preview_by_code(text)`.
@@ -385,9 +403,10 @@
 | **Grading Modal Lifecycle & Auth URL** | `node --test scripts/verify-grading-modal-lifecycle-and-auth-url.js` | **PASS** | 16/16 tests passed: modal visibility control, Promise.all concurrent loading, zero auto-open effects, deliverable status differentiation, centralized production URL helper, HTTPS enforcement, AuthCallback handler |
 | **Course Details & Deliverable Work Resolution** | `node --test scripts/verify-course-details-and-open-work.js` | **PASS** | 5/5 tests passed: `resolveDeliverableUrl` engine, `RoleRoute` cross-role translation, `AdminDashboard` course card routing to class details, sidebar persistence, class-specific assignment context |
 | **Admin View Work & Tracking UI** | `node --test scripts/verify-admin-view-work-and-tracking-ui.js` | **PASS** | 4/4 tests passed: View Work modal triggers, URL sanitization engine, metrics calculation, multi-file link audit |
-| **Vite Production Build** | `npm run build` | **PASS** | Built cleanly in 7.05s (`vite v6.4.5`, 2186 modules transformed, 0 errors) |
-| **React Rules of Hooks Audit** | `node --test scripts/verify-rules-of-hooks-and-component-stability.js` | **PASS** | 5/5 tests passed: invariant hook order in `AssignmentDetails` & `CreateAssignment`, 0 ESLint hook errors across 65 files, package script validation |
-| **ESLint Complete Audit** | `npm run lint` | **PASS** | 0 errors, 173 warnings (`eslint src --ext .js,.jsx`) |
+| **Vite Production Build** | `npm run build` | **PASS** | Built cleanly in 8.85s (`vite v6.4.5`, 2188 modules transformed, 0 errors; `index.js` 52.79 kB / 16.72 kB gzip; `ClassDetailPage` 50.82 kB / 12.75 kB gzip) |
+| **React Rules of Hooks Audit** | `node --test scripts/verify-rules-of-hooks-and-component-stability.js` | **PASS** | 5/5 tests passed: invariant hook order in `AssignmentDetails` & `CreateAssignment`, 0 ESLint hook errors across source files, package script validation |
+| **ESLint Complete Audit** | `npm run lint` | **PASS** | 0 errors, 162 warnings (`eslint src --ext .js,.jsx`) |
+| **Live Preview Performance Benchmark (Before/After)** | Chrome Playwright vs `vite preview` + live Supabase | **PASS** | `studentClassDetail`: 6366 ms (15 reqs) → 2511 ms (7 reqs); `studentClassesSpa`: 479 ms (9 reqs) → 237 ms (2 reqs); `studentDashReturnSpa`: 367 ms (6 reqs) → 184 ms (2 reqs); `adminClassesSpa`: 398 ms (6 reqs) → 96 ms (0 reqs); `adminAssignmentsSpa`: 352 ms (6 reqs) → 231 ms (0 reqs); `adminDashReturnSpa`: 367 ms (4 reqs) → 154 ms (0 reqs); 0 console/page errors |
 | **Group Open Work & Realtime** | `node --test scripts/verify-group-assignment-open-work-and-realtime.js` | **PASS** | 9/9 tests passed: student navigation to `/student/assignments/:id`, fallback group lookup, OneDrive & group metadata display, shared Realtime channel, in-memory bus |
 | **Static Codebase Audit** | AST hook & symbol scan across 65 files | **PASS** | 0 missing hook imports, 0 missing router hooks, 0 dangling references |
 | **Admin Open Work & Login Redirect** | `node scripts/verify-admin-open-work-and-login-redirect.js` | **PASS** | 11/11 tests passed: route reuse, query param inspection, work modal metadata, back cleanup, role redirects, shared-device logout, cache purge |

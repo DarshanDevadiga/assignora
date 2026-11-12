@@ -101,7 +101,7 @@ export default function SubmissionTracking() {
     if (!user?.id) return
     try {
       setLoading(true)
-      const list = await assignmentsService.getAdminAssignments(user.id)
+      const list = await assignmentsService.getAdminAssignmentSummaries(user.id)
       setAssignments(list)
 
       const targetId = paramAssignmentId || searchParams.get('id')
@@ -195,9 +195,12 @@ export default function SubmissionTracking() {
 
     const pastDeadline = isOverdue(currentAssignment.due_date, currentAssignment.due_time)
     const submissionsList = currentAssignment.submissions || []
+    const submissionByStudent = new Map(
+      submissionsList.filter((s) => s?.student_id).map((s) => [s.student_id, s])
+    )
 
     return eligible.map((student, idx) => {
-      const sub = submissionsList.find((s) => s.student_id === student.id)
+      const sub = submissionByStudent.get(student.id)
       const parsed = sub
         ? submissionsService.parseSubmissionComment(sub.comment)
         : { text: '', grade: null, feedback: '' }
@@ -256,16 +259,41 @@ export default function SubmissionTracking() {
     })
   }, [currentAssignment])
 
-  // Summary Metrics
-  const totalEligible = studentRows.length
-  const submittedCount = studentRows.filter((r) => r.isSubmitted).length
-  const pendingCount = studentRows.filter((r) => !r.isSubmitted && !r.isOverdueWithoutSub).length
-  const lateCount = studentRows.filter(
-    (r) => r.isLateSubmission || (!r.isSubmitted && r.isOverdueWithoutSub)
-  ).length
-  const gradedCount = studentRows.filter((r) => r.isGraded).length
-  const awaitingGradingCount = studentRows.filter((r) => r.isSubmitted && !r.isGraded).length
-  const completionRate = calculateCompletionRate(submittedCount, totalEligible)
+  // Summary Metrics (memoized single-pass)
+  const {
+    totalEligible,
+    submittedCount,
+    pendingCount,
+    lateCount,
+    gradedCount,
+    awaitingGradingCount,
+    completionRate,
+  } = useMemo(() => {
+    let subCount = 0
+    let pendCount = 0
+    let ltCount = 0
+    let gradCount = 0
+    let awaitCount = 0
+
+    for (const r of studentRows) {
+      if (r.isSubmitted) subCount += 1
+      if (!r.isSubmitted && !r.isOverdueWithoutSub) pendCount += 1
+      if (r.isLateSubmission || (!r.isSubmitted && r.isOverdueWithoutSub)) ltCount += 1
+      if (r.isGraded) gradCount += 1
+      if (r.isSubmitted && !r.isGraded) awaitCount += 1
+    }
+
+    const total = studentRows.length
+    return {
+      totalEligible: total,
+      submittedCount: subCount,
+      pendingCount: pendCount,
+      lateCount: ltCount,
+      gradedCount: gradCount,
+      awaitingGradingCount: awaitCount,
+      completionRate: calculateCompletionRate(subCount, total),
+    }
+  }, [studentRows])
 
   const isGroupAssignment = currentAssignment?.submission_type === 'group'
   const isAssignmentOverdue = currentAssignment
@@ -1272,6 +1300,8 @@ export default function SubmissionTracking() {
                                     <img
                                       src={row.avatar}
                                       alt={row.name}
+                                      loading="lazy"
+                                      decoding="async"
                                       className="w-full h-full object-cover"
                                     />
                                   ) : (

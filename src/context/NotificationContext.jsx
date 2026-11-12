@@ -2,8 +2,8 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { useAuth } from './AuthContext'
 import { notificationsService } from '../services/notifications.service'
 import { messagesService } from '../services/messages.service'
-import { classesService } from '../services/classes.service'
 import { supabase } from '../lib/supabase.js'
+import { fetchWithCache } from '../utils/dataCache'
 
 const NotificationContext = createContext(null)
 
@@ -36,21 +36,24 @@ export function NotificationProvider({ children }) {
     const currentUserId = userIdRef.current
     if (!currentUserId) return
     try {
-      let enrolledClassIds = []
-
-      if (user?.role === 'admin') {
-        const { data: adminClasses } = await supabase
-          .from('classes')
-          .select('id')
-          .eq('admin_id', currentUserId)
-        enrolledClassIds = (adminClasses || []).map((c) => c.id)
-      } else {
-        const { data: memberRows } = await supabase
-          .from('class_members')
-          .select('class_id')
-          .eq('student_id', currentUserId)
-        enrolledClassIds = (memberRows || []).map((m) => m.class_id)
-      }
+      const enrolledClassIds = await fetchWithCache(
+        `unreadClassIds:${currentUserId}:${user?.role || 'student'}`,
+        async () => {
+          if (user?.role === 'admin') {
+            const { data: adminClasses } = await supabase
+              .from('classes')
+              .select('id')
+              .eq('admin_id', currentUserId)
+            return (adminClasses || []).map((c) => c.id)
+          }
+          const { data: memberRows } = await supabase
+            .from('class_members')
+            .select('class_id')
+            .eq('student_id', currentUserId)
+          return (memberRows || []).map((m) => m.class_id)
+        },
+        { ttlMs: 45000 }
+      )
 
       if (enrolledClassIds.length === 0) {
         setClassUnreadCounts({})
@@ -101,13 +104,32 @@ export function NotificationProvider({ children }) {
       setLoading(false)
     })
 
-    // Fallback sync polling every 15 seconds
+    // Fallback visibility-aware sync polling every 45 seconds (Realtime handles instant updates)
+    let lastSyncAt = Date.now()
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return
+      lastSyncAt = Date.now()
       loadNotifications()
       loadClassUnreadCounts()
-    }, 15000)
+    }, 45000)
 
-    return () => clearInterval(interval)
+    const handleVisibilityChange = () => {
+      if (!document.hidden && Date.now() - lastSyncAt > 20000) {
+        lastSyncAt = Date.now()
+        loadNotifications()
+        loadClassUnreadCounts()
+      }
+    }
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+    }
+
+    return () => {
+      clearInterval(interval)
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+      }
+    }
   }, [user?.id, loadNotifications, loadClassUnreadCounts])
 
   // 3. Realtime subscription to assignora-realtime channel
@@ -287,18 +309,32 @@ export function NotificationProvider({ children }) {
     return Object.values(classUnreadCounts).reduce((acc, curr) => acc + (curr || 0), 0)
   }, [classUnreadCounts])
 
-  const value = {
-    notifications,
-    unreadNotificationsCount,
-    classUnreadCounts,
-    totalClassUnreadCount,
-    loading,
-    markNotificationAsRead,
-    markAllNotificationsAsRead,
-    markClassAsRead,
-    refreshNotifications: loadNotifications,
-    refreshClassUnreadCounts: loadClassUnreadCounts,
-  }
+  const value = useMemo(
+    () => ({
+      notifications,
+      unreadNotificationsCount,
+      classUnreadCounts,
+      totalClassUnreadCount,
+      loading,
+      markNotificationAsRead,
+      markAllNotificationsAsRead,
+      markClassAsRead,
+      refreshNotifications: loadNotifications,
+      refreshClassUnreadCounts: loadClassUnreadCounts,
+    }),
+    [
+      notifications,
+      unreadNotificationsCount,
+      classUnreadCounts,
+      totalClassUnreadCount,
+      loading,
+      markNotificationAsRead,
+      markAllNotificationsAsRead,
+      markClassAsRead,
+      loadNotifications,
+      loadClassUnreadCounts,
+    ]
+  )
 
   return (
     <NotificationContext.Provider value={value}>

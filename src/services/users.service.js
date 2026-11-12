@@ -1,38 +1,54 @@
 import { supabase } from '../lib/supabase.js'
+import { fetchWithCache, invalidateCachePrefix } from '../utils/dataCache.js'
+
+const USER_LIST_COLUMNS = 'id, name, email, role, avatar, student_id, created_at'
 
 export const usersService = {
   /**
-   * Fetch all registered student accounts from public.users
+   * Fetch all registered student accounts from public.users (cached + deduplicated)
    */
-  async getStudents() {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('role', 'student')
-      .order('name', { ascending: true })
+  async getStudents(forceRefresh = false) {
+    return fetchWithCache(
+      'users:students',
+      async () => {
+        const { data, error } = await supabase
+          .from('users')
+          .select(USER_LIST_COLUMNS)
+          .eq('role', 'student')
+          .order('name', { ascending: true })
 
-    if (error) {
-      console.error('[usersService] Error fetching students:', error)
-      throw error
-    }
-    return data || []
+        if (error) {
+          console.error('[usersService] Error fetching students:', error)
+          throw error
+        }
+        return data || []
+      },
+      { ttlMs: 60000, forceRefresh }
+    )
   },
 
   /**
-   * Fetch user by ID
+   * Fetch user by ID (cached)
    */
-  async getUserById(id) {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', id)
-      .single()
+  async getUserById(id, forceRefresh = false) {
+    if (!id) return null
+    return fetchWithCache(
+      `users:detail:${id}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('users')
+          .select(USER_LIST_COLUMNS)
+          .eq('id', id)
+          .single()
 
-    if (error) {
-      console.error('[usersService] Error fetching user by ID:', error)
-      throw error
-    }
-    return data
+        if (error) {
+          console.error('[usersService] Error fetching user by ID:', error)
+          throw error
+        }
+        return data
+      },
+      { ttlMs: 60000, forceRefresh }
+    )
   },
 
   /**
@@ -55,6 +71,7 @@ export const usersService = {
       console.error('[usersService] Error updating profile:', error)
       throw error
     }
+    invalidateCachePrefix('users:', 'classRoster:', 'adminClasses:', 'adminAssignments:')
     return data
   },
 

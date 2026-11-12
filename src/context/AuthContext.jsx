@@ -1,8 +1,7 @@
-import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react'
+import React, { createContext, useContext, useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { authService } from '../services/auth.service'
-import { groupsService } from '../services/groups.service'
-import { messagesService } from '../services/messages.service'
 import { supabase } from '../lib/supabase'
+import { clearAllAppCaches } from '../utils/dataCache'
 
 const AuthContext = createContext(null)
 const CACHE_KEY = 'assignora_cached_profile'
@@ -112,8 +111,11 @@ export function AuthProvider({ children }) {
         setAuthUser(null)
         setProfile(null)
         authService.clearProfileCache()
+        clearAllAppCaches()
         try {
-          groupsService.invalidateGroupCache()
+          import('../services/messages.service.js')
+            .then(({ messagesService }) => messagesService.cleanupRealtime())
+            .catch(() => {})
         } catch (e) {}
         try {
           supabase.removeAllChannels()
@@ -133,8 +135,9 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  const signIn = async (email, password) => {
+  const signIn = useCallback(async (email, password) => {
     setError(null)
+    clearAllAppCaches()
     const result = await authService.signIn(email, password)
     setAuthUser(result.user)
     setProfile(result.profile)
@@ -146,9 +149,9 @@ export function AuthProvider({ children }) {
       )
     } catch (e) {}
     return result
-  }
+  }, [])
 
-  const signUp = async (payload) => {
+  const signUp = useCallback(async (payload) => {
     setError(null)
     const result = await authService.signUp(payload)
     if (result.session && result.user) {
@@ -162,21 +165,20 @@ export function AuthProvider({ children }) {
       } catch (e) {}
     }
     return result
-  }
+  }, [])
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     setError(null)
     authService.clearProfileCache()
+    clearAllAppCaches()
     // Synchronously purge state & localStorage so UI responds with zero lag
     setAuthUser(null)
     setProfile(null)
 
     try {
-      groupsService.invalidateGroupCache()
-    } catch (e) {}
-
-    try {
-      messagesService.cleanupRealtime()
+      import('../services/messages.service.js')
+        .then(({ messagesService }) => messagesService.cleanupRealtime())
+        .catch(() => {})
     } catch (e) {}
 
     try {
@@ -192,17 +194,18 @@ export function AuthProvider({ children }) {
     authService.signOut().catch((err) => {
       console.warn('[AuthContext] Background signout warning:', err)
     })
-  }
+  }, [])
 
-  const refreshProfile = async () => {
-    if (!authUser?.id) return null
+  const refreshProfile = useCallback(async () => {
+    const activeAuthUser = authUserRef.current
+    if (!activeAuthUser?.id) return null
     try {
-      const updatedProfile = await authService.getUserProfile(authUser.id)
+      const updatedProfile = await authService.getUserProfile(activeAuthUser.id, true)
       setProfile(updatedProfile)
       try {
         localStorage.setItem(
           CACHE_KEY,
-          JSON.stringify({ user: authUser, profile: updatedProfile })
+          JSON.stringify({ user: activeAuthUser, profile: updatedProfile })
         )
       } catch (e) {}
       return updatedProfile
@@ -210,7 +213,7 @@ export function AuthProvider({ children }) {
       console.error('[AuthContext] Error refreshing profile:', err)
       return null
     }
-  }
+  }, [])
 
   // Combined user object for application consumption — never allow session without verified profile role
   const user = useMemo(() => {
@@ -227,18 +230,21 @@ export function AuthProvider({ children }) {
     }
   }, [authUser, profile])
 
-  const value = {
-    user,
-    authUser,
-    profile,
-    role: user?.role || null,
-    loading,
-    error,
-    signIn,
-    signUp,
-    signOut,
-    refreshProfile,
-  }
+  const value = useMemo(
+    () => ({
+      user,
+      authUser,
+      profile,
+      role: user?.role || null,
+      loading,
+      error,
+      signIn,
+      signUp,
+      signOut,
+      refreshProfile,
+    }),
+    [user, authUser, profile, loading, error, signIn, signUp, signOut, refreshProfile]
+  )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

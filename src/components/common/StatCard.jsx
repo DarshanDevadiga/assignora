@@ -1,6 +1,6 @@
-import React from 'react'
+import React, { memo } from 'react'
 
-export default function StatCard({
+const StatCard = memo(function StatCard({
   icon: Icon,
   value,
   label,
@@ -66,4 +66,6 @@ export default function StatCard({
       )}
     </div>
   )
-}
+})
+
+export default StatCard

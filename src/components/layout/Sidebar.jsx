@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { memo, useEffect, useRef } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import {
   Home,
@@ -14,8 +14,9 @@ import {
 } from 'lucide-react'
 import NotificationBadge from '../common/NotificationBadge'
 import { registerOverlay } from '../../utils/overlayManager'
+import { prefetchRoute } from '../../utils/routePrefetch'
 
-export default function Sidebar({
+const Sidebar = memo(function Sidebar({
   role = 'admin',
   isOpen = false,
   onClose,
@@ -80,6 +81,9 @@ export default function Sidebar({
               to={item.path}
               end={item.end}
               onClick={onClose}
+              onMouseEnter={() => prefetchRoute(item.path)}
+              onFocus={() => prefetchRoute(item.path)}
+              onTouchStart={() => prefetchRoute(item.path)}
               className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
                 isActive
                   ? 'nav-active-glow text-brand-primary font-semibold shadow-xs'
@@ -171,4 +175,6 @@ export default function Sidebar({
       </aside>
     </>
   )
-}
+})
+
+export default Sidebar

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, lazy, Suspense } from 'react'
 import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -33,7 +33,8 @@ import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
 import { Input, Textarea } from '../../components/common/Input'
-import StudentSelectionModal from '../../components/admin/StudentSelectionModal'
+
+const StudentSelectionModal = lazy(() => import('../../components/admin/StudentSelectionModal'))
 
 export default function CreateAssignment() {
   const { user } = useAuth()
@@ -80,7 +81,10 @@ export default function CreateAssignment() {
     if (!user?.id) return
     try {
       setInitialLoading(true)
-      const adminClasses = await classesService.getAdminClasses(user.id)
+      const [adminClasses, existing] = await Promise.all([
+        classesService.getAdminClasses(user.id),
+        editAssignmentId ? assignmentsService.getAssignmentById(editAssignmentId) : Promise.resolve(null),
+      ])
       setClasses(adminClasses)
 
       const targetClassId = searchParams.get('classId') || location.state?.classId
@@ -90,23 +94,19 @@ export default function CreateAssignment() {
         setSelectedClassId(adminClasses[0].id)
       }
 
-      // If in edit mode, fetch existing assignment details
-      if (editAssignmentId) {
-        const existing = await assignmentsService.getAssignmentById(editAssignmentId)
-        if (existing) {
-          setTitle(existing.title)
-          setDescription(existing.description || '')
-          setSelectedClassId(existing.class_id)
-          setDueDate(existing.due_date || '')
-          setDueTime(existing.due_time ? existing.due_time.substring(0, 5) : '23:59')
-          setPoints(String(existing.points || 100))
-          setDriveLink(existing.drive_link || '')
-          setOnedriveLink(existing.onedrive_link || '')
-          setSubmissionType(existing.submission_type || 'individual')
-          setAssignToAll(existing.assign_to_all)
-          if (!existing.assign_to_all && existing.assignment_students) {
-            setSelectedStudentIds(existing.assignment_students.map((s) => s.student_id))
-          }
+      if (editAssignmentId && existing) {
+        setTitle(existing.title)
+        setDescription(existing.description || '')
+        setSelectedClassId(existing.class_id)
+        setDueDate(existing.due_date || '')
+        setDueTime(existing.due_time ? existing.due_time.substring(0, 5) : '23:59')
+        setPoints(String(existing.points || 100))
+        setDriveLink(existing.drive_link || '')
+        setOnedriveLink(existing.onedrive_link || '')
+        setSubmissionType(existing.submission_type || 'individual')
+        setAssignToAll(existing.assign_to_all)
+        if (!existing.assign_to_all && existing.assignment_students) {
+          setSelectedStudentIds(existing.assignment_students.map((s) => s.student_id))
         }
       } else {
         // Set default due date to 7 days from now
@@ -380,6 +380,10 @@ export default function CreateAssignment() {
                     <img
                       src="https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Drive_icon_%282020%29.svg"
                       alt="Google Drive"
+                      loading="lazy"
+                      decoding="async"
+                      width={20}
+                      height={20}
                       className="w-5 h-5"
                     />
                   </div>
@@ -800,14 +804,18 @@ export default function CreateAssignment() {
       </div>
 
       {/* Student Selection Modal */}
-      <StudentSelectionModal
-        isOpen={isStudentModalOpen}
-        onClose={() => setIsStudentModalOpen(false)}
-        className={currentClass?.name}
-        students={classStudents}
-        selectedStudentIds={selectedStudentIds}
-        onApply={(ids) => setSelectedStudentIds(ids)}
-      />
+      {isStudentModalOpen && (
+        <Suspense fallback={null}>
+          <StudentSelectionModal
+            isOpen={isStudentModalOpen}
+            onClose={() => setIsStudentModalOpen(false)}
+            className={currentClass?.name}
+            students={classStudents}
+            selectedStudentIds={selectedStudentIds}
+            onApply={(ids) => setSelectedStudentIds(ids)}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }

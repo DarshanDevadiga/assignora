@@ -227,6 +227,8 @@ export default function AddGroupMembersModal({
                         <img
                           src={student.avatar}
                           alt={student.name}
+                          loading="lazy"
+                          decoding="async"
                           className="w-full h-full object-cover rounded-full"
                         />
                       ) : (

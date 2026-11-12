@@ -1,9 +1,17 @@
 import { supabase } from '../lib/supabase.js'
 import { getAuthRedirectUrl } from '../utils/appUrl.js'
+import { subscribeCacheClear } from '../utils/dataCache.js'
 
 const profileCache = new Map()
+const inFlightProfileRequests = new Map()
 const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
 const PENDING_REG_KEY = 'assignora_pending_registration'
+const USER_PROFILE_COLUMNS = 'id, name, email, role, avatar, student_id, created_at'
+
+subscribeCacheClear(() => {
+  profileCache.clear()
+  inFlightProfileRequests.clear()
+})
 
 /**
  * Authentication Service for Assignora
@@ -99,7 +107,7 @@ export const authService = {
       // Check if an existing profile row is present before failing
       const { data: existingRow } = await supabase
         .from('users')
-        .select('*')
+        .select(USER_PROFILE_COLUMNS)
         .eq('id', sessionUser.id)
         .maybeSingle()
 
@@ -118,7 +126,7 @@ export const authService = {
     // Re-query public.users (in case a database trigger created the profile concurrently)
     const { data: queriedProfile, error: queryError } = await supabase
       .from('users')
-      .select('*')
+      .select(USER_PROFILE_COLUMNS)
       .eq('id', sessionUser.id)
       .maybeSingle()
 
@@ -343,46 +351,64 @@ export const authService = {
       }
     }
 
-    // Query with .maybeSingle() so 0 rows never produces HTTP 406 Not Acceptable
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle()
+    if (!forceFresh && inFlightProfileRequests.has(userId)) {
+      return inFlightProfileRequests.get(userId)
+    }
 
-    if (error) {
-      // Handle rare duplicate profile integrity issue if more than 1 row matched
-      if (error.code === 'PGRST116' || error.message?.includes('multiple')) {
-        console.error(`[authService] Data integrity warning: duplicate profile rows detected for ${userId}`)
-        const { data: rows, error: listErr } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', userId)
-          .order('created_at', { ascending: true })
-          .limit(1)
+    const fetchPromise = (async () => {
+      // Query with .maybeSingle() so 0 rows never produces HTTP 406 Not Acceptable
+      const { data, error } = await supabase
+        .from('users')
+        .select(USER_PROFILE_COLUMNS)
+        .eq('id', userId)
+        .maybeSingle()
 
-        if (!listErr && rows?.length > 0) {
-          profileCache.set(userId, { profile: rows[0], timestamp: Date.now() })
-          return rows[0]
+      if (error) {
+        // Handle rare duplicate profile integrity issue if more than 1 row matched
+        if (error.code === 'PGRST116' || error.message?.includes('multiple')) {
+          console.error(`[authService] Data integrity warning: duplicate profile rows detected for ${userId}`)
+          const { data: rows, error: listErr } = await supabase
+            .from('users')
+            .select(USER_PROFILE_COLUMNS)
+            .eq('id', userId)
+            .order('created_at', { ascending: true })
+            .limit(1)
+
+          if (!listErr && rows?.length > 0) {
+            profileCache.set(userId, { profile: rows[0], timestamp: Date.now() })
+            return rows[0]
+          }
         }
+        console.error(`[authService] Database error fetching profile for ${userId}:`, error.message)
+        throw new Error(error.message || 'Failed to retrieve user profile.')
       }
-      console.error(`[authService] Database error fetching profile for ${userId}:`, error.message)
-      throw new Error(error.message || 'Failed to retrieve user profile.')
+
+      if (data) {
+        profileCache.set(userId, { profile: data, timestamp: Date.now() })
+        return data
+      }
+
+      // No profile row exists yet: if this userId matches the active authenticated session, self-heal
+      const { data: sessionData } = await supabase.auth.getSession()
+      const currentUser = sessionData?.session?.user
+      if (currentUser && currentUser.id === userId) {
+        return await this.ensureUserProfile(currentUser)
+      }
+
+      return null
+    })()
+
+    if (!forceFresh) {
+      inFlightProfileRequests.set(userId, fetchPromise)
     }
 
-    if (data) {
-      profileCache.set(userId, { profile: data, timestamp: Date.now() })
-      return data
+    try {
+      return await fetchPromise
+    } finally {
+      if (!forceFresh) {
+        inFlightProfileRequests.delete(userId)
+      }
     }
-
-    // No profile row exists yet: if this userId matches the active authenticated session, self-heal
-    const { data: sessionData } = await supabase.auth.getSession()
-    const currentUser = sessionData?.session?.user
-    if (currentUser && currentUser.id === userId) {
-      return await this.ensureUserProfile(currentUser)
-    }
-
-    return null
   },
 
   /**

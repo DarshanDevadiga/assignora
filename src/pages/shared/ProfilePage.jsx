@@ -129,7 +129,7 @@ export default function ProfilePage() {
             <div className="relative">
               <div className="w-24 h-24 rounded-full bg-white text-brand-primary flex items-center justify-center font-bold text-3xl shadow-modal ring-4 ring-white/30 overflow-hidden">
                 {user?.avatar ? (
-                  <img src={user.avatar} alt={displayName} className="w-full h-full object-cover" />
+                  <img src={user.avatar} alt={displayName} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                 ) : (
                   <span>{displayName.charAt(0)}</span>
                 )}
@@ -306,7 +306,7 @@ export default function ProfilePage() {
                       editAvatar === url ? 'border-brand-primary ring-2 ring-brand-primary/40 scale-105' : 'border-slate-200 hover:border-brand-border'
                     }`}
                   >
-                    <img src={url} alt={`Preset ${i}`} className="w-full h-full object-cover" />
+                    <img src={url} alt={`Preset ${i}`} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                   </button>
                 ))}
               </div>

@@ -1,6 +1,6 @@
-import React from 'react'
+import React, { memo } from 'react'
 
-export default function Badge({
+const Badge = memo(function Badge({
   children,
   variant = 'neutral',
   size = 'md',
@@ -41,4 +41,6 @@ export default function Badge({
       {children}
     </span>
   )
-}
+})
+
+export default Badge

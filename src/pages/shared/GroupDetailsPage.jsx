@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react'
 import { useParams, useNavigate, Link, useLocation, useSearchParams } from 'react-router-dom'
 import {
   Users,
@@ -27,8 +27,9 @@ import {
 import Card from '../../components/common/Card'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
-import AddGroupMembersModal from '../../components/group/AddGroupMembersModal'
 import Modal from '../../components/common/Modal'
+
+const AddGroupMembersModal = lazy(() => import('../../components/group/AddGroupMembersModal'))
 import { groupsService } from '../../services/groups.service'
 import { reconcileAndDeduplicateMessages } from '../../services/messages.service'
 import { useAuth } from '../../context/AuthContext'
@@ -1283,18 +1284,22 @@ export default function GroupDetailsPage() {
       )}
 
       {/* SUB-MODAL 1: Add Members Modal */}
-      <AddGroupMembersModal
-        isOpen={isAddMembersOpen}
-        onClose={() => setIsAddMembersOpen(false)}
-        group={group}
-        classId={effectiveClassId}
-        className={group.className}
-        onMembersAdded={async () => {
-          setIsAddMembersOpen(false)
-          setPageFeedback({ type: 'success', text: 'New members successfully added to the group!' })
-          await loadGroupData()
-        }}
-      />
+      {isAddMembersOpen && (
+        <Suspense fallback={null}>
+          <AddGroupMembersModal
+            isOpen={isAddMembersOpen}
+            onClose={() => setIsAddMembersOpen(false)}
+            group={group}
+            classId={effectiveClassId}
+            className={group.className}
+            onMembersAdded={async () => {
+              setIsAddMembersOpen(false)
+              setPageFeedback({ type: 'success', text: 'New members successfully added to the group!' })
+              await loadGroupData()
+            }}
+          />
+        </Suspense>
+      )}
 
       {/* SUB-MODAL 2: Transfer Leadership Confirmation */}
       {memberToTransfer && (

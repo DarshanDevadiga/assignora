@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   Users,
   UserPlus,
@@ -38,61 +38,61 @@ export default function StudentsManagement() {
   const [isRemoveModalOpen, setIsRemoveModalOpen] = useState(false)
   const [removing, setRemoving] = useState(false)
 
-  useEffect(() => {
-    loadData()
-  }, [user?.id])
-
-  async function loadData() {
+  const loadData = useCallback(async (force = false) => {
     if (!user?.id) return
     try {
       setLoading(true)
       const [fetchedClasses, studentsList] = await Promise.all([
-        classesService.getAdminClasses(user.id),
-        usersService.getStudents(),
+        classesService.getAdminClasses(user.id, force),
+        usersService.getStudents(force),
       ])
 
       setClasses(fetchedClasses)
       setAllStudents(studentsList)
       if (fetchedClasses.length > 0) {
-        setSelectedClassId(fetchedClasses[0].id)
+        setSelectedClassId((prev) => prev && fetchedClasses.some((c) => c.id === prev) ? prev : fetchedClasses[0].id)
       }
     } catch (err) {
       console.error('[StudentsManagement] Error loading data:', err)
     } finally {
       setLoading(false)
     }
-  }
+  }, [user?.id])
 
-  const currentClass = classes.find((c) => c.id === selectedClassId)
-  const enrolledMembers = currentClass?.class_members || []
+  useEffect(() => {
+    loadData()
+  }, [loadData])
 
-  // Filter enrolled members
-  const filteredMembers = enrolledMembers.filter((m) => {
-    if (!searchQuery.trim()) return true
+  const currentClass = useMemo(() => classes.find((c) => c.id === selectedClassId), [classes, selectedClassId])
+  const enrolledMembers = useMemo(() => currentClass?.class_members || [], [currentClass])
+
+  // Filter enrolled members (memoized)
+  const filteredMembers = useMemo(() => {
+    if (!searchQuery.trim()) return enrolledMembers
     const q = searchQuery.toLowerCase()
-    return (
+    return enrolledMembers.filter((m) => (
       m.users?.name?.toLowerCase().includes(q) ||
       m.users?.email?.toLowerCase().includes(q) ||
       m.users?.student_id?.toLowerCase().includes(q)
-    )
-  })
+    ))
+  }, [enrolledMembers, searchQuery])
 
-  // Available students to enroll (not currently enrolled in selected class)
-  const enrolledStudentIds = new Set(enrolledMembers.map((m) => m.student_id))
-  const availableToEnroll = allStudents.filter((s) => !enrolledStudentIds.has(s.id))
+  // Available students to enroll (memoized)
+  const availableToEnroll = useMemo(() => {
+    const enrolledStudentIds = new Set(enrolledMembers.map((m) => m.student_id))
+    return allStudents.filter((s) => !enrolledStudentIds.has(s.id))
+  }, [allStudents, enrolledMembers])
 
-  // Handle Enroll Submit
+  // Handle Enroll Submit (parallelized)
   const handleEnrollSubmit = async () => {
     if (selectedStudentsToEnroll.length === 0 || !selectedClassId) return
 
     try {
       setEnrolling(true)
-      for (const sId of selectedStudentsToEnroll) {
-        await classesService.addMember(selectedClassId, sId)
-      }
+      await Promise.all(selectedStudentsToEnroll.map((sId) => classesService.addMember(selectedClassId, sId)))
       setIsEnrollModalOpen(false)
       setSelectedStudentsToEnroll([])
-      await loadData()
+      await loadData(true)
     } catch (err) {
       console.error('[StudentsManagement] Error enrolling students:', err)
     } finally {
@@ -109,7 +109,7 @@ export default function StudentsManagement() {
       await classesService.removeMember(removingMember.id)
       setIsRemoveModalOpen(false)
       setRemovingMember(null)
-      await loadData()
+      await loadData(true)
     } catch (err) {
       console.error('[StudentsManagement] Error removing member:', err)
     } finally {

@@ -32,7 +32,7 @@ export default function StudentProfileModal({ isOpen, onClose, member }) {
         <div className="relative rounded-2xl p-6 bg-gradient-to-br from-brand-secondaryBg to-brand-light border border-brand-border/60 text-center">
           <div className="w-20 h-20 rounded-full bg-white text-brand-primary mx-auto flex items-center justify-center font-bold text-2xl shadow-card ring-4 ring-brand-primary/20 overflow-hidden">
             {student.avatar ? (
-              <img src={student.avatar} alt={student.name} className="w-full h-full object-cover" />
+              <img src={student.avatar} alt={student.name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
             ) : (
               <span>{student.name?.charAt(0) || 'S'}</span>
             )}

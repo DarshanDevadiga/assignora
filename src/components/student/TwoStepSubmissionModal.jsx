@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react'
 import { Send, CheckCircle2, X, Clock, ExternalLink } from 'lucide-react'
-import confetti from 'canvas-confetti'
 import Modal from '../common/Modal'
 import Button from '../common/Button'
 import { formatDisplayDate } from '../../utils/calculations'
@@ -70,8 +69,9 @@ export default function TwoStepSubmissionModal({
         }).catch(() => {})
       }
 
-      // Trigger celebratory confetti
+      // Trigger celebratory confetti dynamically on success
       try {
+        const { default: confetti } = await import('canvas-confetti')
         confetti({
           particleCount: 80,
           spread: 70,

@@ -32,7 +32,7 @@ import { classifyDeliverable } from '../../utils/deliverableClassifier'
  * GroupSubmissionCard
  * Modern, responsive submission card used across Admin, Professor, and Student dashboards.
  */
-export default function GroupSubmissionCard({
+const GroupSubmissionCardMemo = React.memo(function GroupSubmissionCardContent({
   group,
   submission,
   assignment,
@@ -495,4 +495,8 @@ export default function GroupSubmissionCard({
       </div>
     </Card>
   )
+})
+
+export default function GroupSubmissionCard(props) {
+  return <GroupSubmissionCardMemo {...props} />
 }

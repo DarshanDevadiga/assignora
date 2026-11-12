@@ -1,192 +1,245 @@
-import { supabase, supabaseUrl, supabaseAnonKey } from '../lib/supabase.js'
+import { supabase } from '../lib/supabase.js'
 import { authService } from './auth.service.js'
+import { fetchWithCache, invalidateCachePrefix } from '../utils/dataCache.js'
+
+function invalidateClassMutationCaches(classId) {
+  invalidateCachePrefix(
+    'adminClasses:',
+    'studentClasses:',
+    'studentDashboard:',
+    'adminAssignments:',
+    'adminAssignmentSummaries:',
+    'unreadClassIds:',
+    'announcements:'
+  )
+  if (classId) {
+    invalidateCachePrefix(`classDetail:${classId}`, `classRoster:${classId}`)
+  } else {
+    invalidateCachePrefix('classDetail:', 'classRoster:')
+  }
+}
 
 export const classesService = {
   /**
-   * Get all classes created by the current admin
+   * Get all classes created by the current admin (cached + in-flight deduplicated)
    */
-  async getAdminClasses(adminId) {
-    const { data, error } = await supabase
-      .from('classes')
-      .select(`
-        *,
-        class_members (
-          id,
-          student_id,
-          joined_at,
-          users:student_id (id, name, email, avatar, student_id)
-        ),
-        assignments (
-          id,
-          title,
-          status,
-          due_date,
-          due_time,
-          points,
-          submission_type,
-          onedrive_link
-        )
-      `)
-      .eq('admin_id', adminId)
-      .order('created_at', { ascending: false })
+  async getAdminClasses(adminId, forceRefresh = false) {
+    if (!adminId) return []
+    return fetchWithCache(
+      `adminClasses:${adminId}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('classes')
+          .select(`
+            id,
+            name,
+            subject,
+            description,
+            class_code,
+            admin_id,
+            created_at,
+            class_members (
+              id,
+              student_id,
+              joined_at,
+              users:student_id (id, name, email, avatar, student_id)
+            ),
+            assignments (
+              id,
+              title,
+              status,
+              due_date,
+              due_time,
+              points,
+              submission_type,
+              onedrive_link
+            )
+          `)
+          .eq('admin_id', adminId)
+          .order('created_at', { ascending: false })
 
-    if (error) {
-      console.error('[classesService] Error fetching admin classes:', error)
-      throw error
-    }
-    return data || []
+        if (error) {
+          console.error('[classesService] Error fetching admin classes:', error)
+          throw error
+        }
+        return data || []
+      },
+      { ttlMs: 45000, forceRefresh }
+    )
   },
 
   /**
-   * Get all classes enrolled by a student
+   * Get all classes enrolled by a student (cached + in-flight deduplicated)
    */
-  async getStudentClasses(studentId) {
+  async getStudentClasses(studentId, forceRefresh = false) {
     if (!studentId) return []
-    const { data, error } = await supabase
-      .from('class_members')
-      .select(`
-        id,
-        joined_at,
-        class_id,
-        classes (
-          id,
-          name,
-          subject,
-          description,
-          admin_id,
-          users:admin_id (id, name, email, avatar),
-          assignments (id, title, due_date, points, submission_type, onedrive_link)
-        )
-      `)
-      .eq('student_id', studentId)
+    return fetchWithCache(
+      `studentClasses:${studentId}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('class_members')
+          .select(`
+            id,
+            joined_at,
+            class_id,
+            classes (
+              id,
+              name,
+              subject,
+              description,
+              class_code,
+              admin_id,
+              created_at,
+              users:admin_id (id, name, email, avatar),
+              class_members (id, student_id),
+              assignments (id, title, status, due_date, due_time, points, submission_type, onedrive_link)
+            )
+          `)
+          .eq('student_id', studentId)
 
-    if (error) {
-      console.error('[classesService] Error fetching student classes:', error)
-      throw error
-    }
-    return (data || []).map((m) => ({ ...m.classes, membership_id: m.id, joined_at: m.joined_at })).filter(Boolean)
+        if (error) {
+          console.error('[classesService] Error fetching student classes:', error)
+          throw error
+        }
+        return (data || []).map((m) => ({ ...m.classes, membership_id: m.id, joined_at: m.joined_at })).filter(Boolean)
+      },
+      { ttlMs: 45000, forceRefresh }
+    )
   },
 
   /**
-   * Get a single class by id with members and assignments
+   * Get a single class by id with members and assignments (cached + in-flight deduplicated)
    */
-  async getClassById(classId) {
-    const { data, error } = await supabase
-      .from('classes')
-      .select(`
-        *,
-        users:admin_id (id, name, email, avatar),
-        class_members (
-          id,
-          student_id,
-          joined_at,
-          users:student_id (id, name, email, avatar, student_id)
-        ),
-        assignments (
-          id,
-          title,
-          description,
-          due_date,
-          due_time,
-          drive_link,
-          onedrive_link,
-          submission_type,
-          points,
-          assign_to_all,
-          status,
-          created_at
-        )
-      `)
-      .eq('id', classId)
-      .single()
+  async getClassById(classId, forceRefresh = false) {
+    if (!classId) return null
+    return fetchWithCache(
+      `classDetail:${classId}`,
+      async () => {
+        const { data, error } = await supabase
+          .from('classes')
+          .select(`
+            id,
+            name,
+            subject,
+            description,
+            class_code,
+            admin_id,
+            created_at,
+            users:admin_id (id, name, email, avatar),
+            class_members (
+              id,
+              student_id,
+              joined_at,
+              users:student_id (id, name, email, avatar, student_id)
+            ),
+            assignments (
+              id,
+              title,
+              description,
+              due_date,
+              due_time,
+              drive_link,
+              onedrive_link,
+              submission_type,
+              points,
+              assign_to_all,
+              status,
+              created_at
+            )
+          `)
+          .eq('id', classId)
+          .single()
 
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return null
-      }
-      console.error('[classesService] Error fetching class details:', error)
-      throw error
-    }
-    return data
-  },
-
-  /**
-   * Complete Class Roster: Instructor, Enrolled Students & Group Affiliations
-   * Solves RLS peer visibility issue so both students and professors see the full class participant roster.
-   */
-  async getClassRoster(classId) {
-    if (!classId) return { instructor: null, students: [], total_students: 0 }
-
-    try {
-      const { data, error } = await supabase.rpc('get_class_roster', {
-        p_class_id: classId,
-      })
-
-      if (!error && data && data.success) {
+        if (error) {
+          if (error.code === 'PGRST116') {
+            return null
+          }
+          console.error('[classesService] Error fetching class details:', error)
+          throw error
+        }
         return data
-      }
-    } catch (err) {
-      console.warn('[classesService] getClassRoster RPC fallback:', err)
-    }
+      },
+      { ttlMs: 45000, forceRefresh }
+    )
+  },
 
-    // Defensive fallback using direct relations and group mapping
-    try {
-      const cls = await this.getClassById(classId)
-      if (!cls) return { instructor: null, students: [], total_students: 0 }
+  /**
+   * Complete Class Roster: Instructor, Enrolled Students & Group Affiliations (cached + deduplicated)
+   */
+  async getClassRoster(classId, forceRefresh = false) {
+    if (!classId) return { instructor: null, students: [], total_students: 0 }
+    return fetchWithCache(
+      `classRoster:${classId}`,
+      async () => {
+        try {
+          const { data, error } = await supabase.rpc('get_class_roster', {
+            p_class_id: classId,
+          })
 
-      const instructor = cls.users || { name: 'Faculty Member', email: '', role: 'instructor' }
-      const members = cls.class_members || []
+          if (!error && data && data.success) {
+            return data
+          }
+        } catch (err) {
+          console.warn('[classesService] getClassRoster RPC fallback:', err)
+        }
 
-      // Fetch active groups in this class to annotate group_name and is_leader
-      let groupMap = {}
-      try {
-        const { data: grpData } = await supabase
-          .from('group_members')
-          .select('student_id, groups:group_id (id, name, leader_id, status)')
-          .eq('class_id', classId)
+        // Defensive fallback using direct relations and group mapping
+        try {
+          const [cls, grpRes] = await Promise.all([
+            this.getClassById(classId),
+            supabase
+              .from('group_members')
+              .select('student_id, groups (id, name, leader_id, status)')
+              .eq('class_id', classId),
+          ])
+          if (!cls) return { instructor: null, students: [], total_students: 0 }
 
-        ;(grpData || []).forEach((gm) => {
-          if (gm.groups && gm.groups.status === 'active') {
-            groupMap[gm.student_id] = {
-              group_id: gm.groups.id,
-              group_name: gm.groups.name,
-              is_leader: gm.groups.leader_id === gm.student_id,
+          const instructor = cls.users || { name: 'Faculty Member', email: '', role: 'instructor' }
+          const members = cls.class_members || []
+
+          const groupMap = {}
+          ;(grpRes?.data || []).forEach((gm) => {
+            if (gm.groups && gm.groups.status === 'active') {
+              groupMap[gm.student_id] = {
+                group_id: gm.groups.id,
+                group_name: gm.groups.name,
+                is_leader: gm.groups.leader_id === gm.student_id,
+              }
             }
-          }
-        })
-      } catch (gErr) {
-        console.warn('[classesService] getClassRoster group annotation fallback:', gErr)
-      }
+          })
 
-      const students = members
-        .filter((m) => m.users && m.users.role !== 'admin')
-        .map((m) => {
-          const u = m.users || {}
-          const grp = groupMap[m.student_id] || {}
+          const students = members
+            .filter((m) => m.users && m.users.role !== 'admin')
+            .map((m) => {
+              const u = m.users || {}
+              const grp = groupMap[m.student_id] || {}
+              return {
+                id: m.id,
+                student_id: m.student_id,
+                name: u.name || 'Student',
+                email: u.email || '',
+                avatar: u.avatar || null,
+                role: 'student',
+                joined_at: m.joined_at,
+                group_id: grp.group_id || null,
+                group_name: grp.group_name || null,
+                is_leader: Boolean(grp.is_leader),
+              }
+            })
+
           return {
-            id: m.id,
-            student_id: m.student_id,
-            name: u.name || 'Student',
-            email: u.email || '',
-            avatar: u.avatar || null,
-            role: 'student',
-            joined_at: m.joined_at,
-            group_id: grp.group_id || null,
-            group_name: grp.group_name || null,
-            is_leader: Boolean(grp.is_leader),
+            success: true,
+            instructor,
+            students,
+            total_students: students.length,
           }
-        })
-
-      return {
-        success: true,
-        instructor,
-        students,
-        total_students: students.length,
-      }
-    } catch (fallbackErr) {
-      console.error('[classesService] getClassRoster fallback failed:', fallbackErr)
-      return { instructor: null, students: [], total_students: 0 }
-    }
+        } catch (fallbackErr) {
+          console.error('[classesService] getClassRoster fallback failed:', fallbackErr)
+          return { instructor: null, students: [], total_students: 0 }
+        }
+      },
+      { ttlMs: 45000, forceRefresh }
+    )
   },
 
   /**
@@ -248,6 +301,7 @@ export const classesService = {
       console.error('[classesService] Error creating class:', error)
       throw error
     }
+    invalidateClassMutationCaches(data?.id)
     return data
   },
 
@@ -270,6 +324,7 @@ export const classesService = {
       console.error('[classesService] Error updating class:', error)
       throw error
     }
+    invalidateClassMutationCaches(classId)
     return data
   },
 
@@ -295,6 +350,7 @@ export const classesService = {
       console.error('[classesService] Error deleting class:', error)
       throw error
     }
+    invalidateClassMutationCaches(classId)
     return true
   },
 
@@ -321,6 +377,7 @@ export const classesService = {
       console.error('[classesService] Error adding member to class:', error)
       throw error
     }
+    invalidateClassMutationCaches(classId)
     return data
   },
 
@@ -337,6 +394,7 @@ export const classesService = {
       console.error('[classesService] Error removing member:', error)
       throw error
     }
+    invalidateClassMutationCaches()
     return true
   },
 
@@ -473,6 +531,7 @@ export const classesService = {
 
     if (!rpcErr && rpcRes) {
       if (rpcRes.success) {
+        invalidateClassMutationCaches(rpcRes.class_id)
         return {
           success: true,
           classId: rpcRes.class_id,
@@ -500,6 +559,7 @@ export const classesService = {
     }
 
     const membership = await this.enrollStudent(cls.id, studentId, cleanCode)
+    invalidateClassMutationCaches(cls.id)
     return {
       success: true,
       classId: cls.id,
@@ -604,6 +664,7 @@ export const classesService = {
 
       if (!rpcErr && rpcRes) {
         if (rpcRes.success) {
+          invalidateClassMutationCaches(rpcRes.class_id || classId)
           // Retrieve resulting membership record to confirm persistence
           const { data: confirmedRow } = await supabase
             .from('class_members')
@@ -671,22 +732,50 @@ export const classesService = {
       throw new Error('Enrollment could not be confirmed. Please try again.')
     }
 
+    invalidateClassMutationCaches(classId)
     return newMember
   },
 
   /**
-   * Fetch aggregated chronological activity history for a specific class
+   * Fetch aggregated chronological activity history for a specific class.
+   * Reuses pre-fetched class data when provided to avoid duplicate Supabase queries.
    */
-  async getClassActivity(classId) {
+  async getClassActivity(classId, prefetched = null) {
     const activities = []
 
-    // 1. Enrolled students
-    const { data: members } = await supabase
-      .from('class_members')
-      .select('id, joined_at, users:student_id(id, name, email, avatar)')
-      .eq('class_id', classId)
+    let members = prefetched?.members || null
+    let announcements = prefetched?.announcements || null
+    let assignments = prefetched?.assignments || null
+    let submissions = prefetched?.submissions || null
 
-    members?.forEach((m) => {
+    if (!members || !announcements || !assignments) {
+      const [memRes, annRes, assignRes] = await Promise.all([
+        members
+          ? Promise.resolve({ data: members })
+          : supabase
+              .from('class_members')
+              .select('id, joined_at, users:student_id(id, name, email, avatar)')
+              .eq('class_id', classId),
+        announcements
+          ? Promise.resolve({ data: announcements })
+          : supabase
+              .from('announcements')
+              .select('id, title, created_at, users:admin_id(id, name, avatar)')
+              .eq('class_id', classId),
+        assignments
+          ? Promise.resolve({ data: assignments })
+          : supabase
+              .from('assignments')
+              .select('id, title, created_at, points')
+              .eq('class_id', classId),
+      ])
+
+      members = memRes.data || []
+      announcements = annRes.data || []
+      assignments = assignRes.data || []
+    }
+
+    members.forEach((m) => {
       activities.push({
         id: `member-${m.id}`,
         type: 'enrolled',
@@ -697,13 +786,7 @@ export const classesService = {
       })
     })
 
-    // 2. Class announcements
-    const { data: announcements } = await supabase
-      .from('announcements')
-      .select('id, title, created_at, users:admin_id(id, name, avatar)')
-      .eq('class_id', classId)
-
-    announcements?.forEach((a) => {
+    announcements.forEach((a) => {
       activities.push({
         id: `announcement-${a.id}`,
         type: 'announcement',
@@ -714,15 +797,9 @@ export const classesService = {
       })
     })
 
-    // 3. Assignments created
-    const { data: assignments } = await supabase
-      .from('assignments')
-      .select('id, title, created_at, points')
-      .eq('class_id', classId)
-
     const assignmentIds = (assignments || []).map((a) => a.id)
 
-    assignments?.forEach((a) => {
+    assignments.forEach((a) => {
       activities.push({
         id: `assignment-${a.id}`,
         type: 'assignment_created',
@@ -732,42 +809,43 @@ export const classesService = {
       })
     })
 
-    // 4. Submissions and Gradings
-    if (assignmentIds.length > 0) {
-      const { data: submissions } = await supabase
+    // Submissions and Gradings (reuse pre-fetched submissions if passed)
+    if (!submissions && assignmentIds.length > 0) {
+      const { data: fetchedSubs } = await supabase
         .from('submissions')
         .select(`
           id,
           status,
           submitted_at,
           updated_at,
-          comment,
           assignments (title),
           users:student_id (name, avatar)
         `)
         .in('assignment_id', assignmentIds)
-
-      submissions?.forEach((s) => {
-        activities.push({
-          id: `submission-${s.id}`,
-          type: 'submitted',
-          title: `${s.users?.name || 'Student'} submitted "${s.assignments?.title}"`,
-          timestamp: s.submitted_at,
-          user: s.users,
-          icon: 'CheckSquare',
-        })
-
-        if (s.status === 'reviewed' && s.updated_at) {
-          activities.push({
-            id: `graded-${s.id}`,
-            type: 'graded',
-            title: `Assignment graded for ${s.users?.name || 'student'} ("${s.assignments?.title}")`,
-            timestamp: s.updated_at,
-            icon: 'Award',
-          })
-        }
-      })
+      submissions = fetchedSubs || []
     }
+
+    const validSubmissions = Array.isArray(submissions) ? submissions : []
+    validSubmissions.forEach((s) => {
+      activities.push({
+        id: `submission-${s.id}`,
+        type: 'submitted',
+        title: `${s.users?.name || 'Student'} submitted "${s.assignments?.title || 'Assignment'}"`,
+        timestamp: s.submitted_at,
+        user: s.users,
+        icon: 'CheckSquare',
+      })
+
+      if (s.status === 'reviewed' && s.updated_at) {
+        activities.push({
+          id: `graded-${s.id}`,
+          type: 'graded',
+          title: `Assignment graded for ${s.users?.name || 'student'} ("${s.assignments?.title || 'Assignment'}")`,
+          timestamp: s.updated_at,
+          icon: 'Award',
+        })
+      }
+    })
 
     // Sort descending by timestamp
     activities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
@@ -775,20 +853,33 @@ export const classesService = {
   },
 
   /**
-   * Extract or assemble curated educational resources for a class
+   * Extract or assemble curated educational resources for a class.
+   * Reuses pre-fetched class record when provided to avoid duplicate queries.
    */
-  async getClassResources(classId) {
-    const { data: cls } = await supabase
-      .from('classes')
-      .select('id, name, subject')
-      .eq('id', classId)
-      .maybeSingle()
+  async getClassResources(classId, prefetchedClass = null) {
+    let cls = prefetchedClass
+    let assignments = prefetchedClass?.assignments || null
 
-    const { data: assignments } = await supabase
-      .from('assignments')
-      .select('id, title, drive_link, created_at')
-      .eq('class_id', classId)
-      .not('drive_link', 'is', null)
+    if (!cls || !assignments) {
+      const [clsRes, assignRes] = await Promise.all([
+        cls
+          ? Promise.resolve({ data: cls })
+          : supabase
+              .from('classes')
+              .select('id, name, subject')
+              .eq('id', classId)
+              .maybeSingle(),
+        assignments
+          ? Promise.resolve({ data: assignments })
+          : supabase
+              .from('assignments')
+              .select('id, title, drive_link, created_at')
+              .eq('class_id', classId)
+              .not('drive_link', 'is', null),
+      ])
+      cls = clsRes.data
+      assignments = assignRes.data || []
+    }
 
     const resources = []
 

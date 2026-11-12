@@ -9,14 +9,12 @@ export default defineConfig({
     host: true,
   },
   build: {
-    chunkSizeWarningLimit: 600,
+    chunkSizeWarningLimit: 500,
     rollupOptions: {
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom', 'react-router-dom'],
           supabase: ['@supabase/supabase-js'],
-          icons: ['lucide-react'],
-          confetti: ['canvas-confetti'],
         },
       },
     },

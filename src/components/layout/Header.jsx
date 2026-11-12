@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { memo, useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Menu,
@@ -15,7 +15,7 @@ import {
 import SearchInput from '../common/SearchInput'
 import NotificationBadge from '../common/NotificationBadge'
 
-export default function Header({
+const Header = memo(function Header({
   user,
   role = 'admin',
   unreadNotifications = 0,
@@ -113,7 +113,7 @@ export default function Header({
           >
             <div className="w-9 h-9 rounded-full bg-brand-light text-brand-primary flex items-center justify-center font-bold text-sm overflow-hidden ring-2 ring-brand-border/60">
               {user?.avatar ? (
-                <img src={user.avatar} alt={displayName} className="w-full h-full object-cover" />
+                <img src={user.avatar} alt={displayName} width={36} height={36} loading="lazy" decoding="async" className="w-full h-full object-cover" />
               ) : (
                 <span>{displayName.charAt(0)}</span>
               )}
@@ -206,4 +206,6 @@ export default function Header({
       </div>
     </header>
   )
-}
+})
+
+export default Header

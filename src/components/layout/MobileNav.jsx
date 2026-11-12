@@ -1,8 +1,9 @@
-import React from 'react'
+import React, { memo } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Home, BookOpen, ClipboardList, Users, Bell, MoreHorizontal } from 'lucide-react'
+import { Home, BookOpen, Users, Bell, MoreHorizontal } from 'lucide-react'
+import { prefetchRoute } from '../../utils/routePrefetch'
 
-export default function MobileNav({ role = 'admin', onOpenMenu }) {
+const MobileNav = memo(function MobileNav({ role = 'admin', onOpenMenu }) {
   const items = role === 'admin' ? [
     { label: 'Home', path: '/admin', icon: Home, end: true },
     { label: 'Classes', path: '/admin/classes', icon: BookOpen },
@@ -22,6 +23,9 @@ export default function MobileNav({ role = 'admin', onOpenMenu }) {
             key={item.label}
             to={item.path}
             end={item.end}
+            onMouseEnter={() => prefetchRoute(item.path)}
+            onTouchStart={() => prefetchRoute(item.path)}
+            onFocus={() => prefetchRoute(item.path)}
             className={({ isActive }) =>
               `flex flex-col items-center justify-center py-1 px-3 rounded-lg text-[10px] font-medium transition-colors ${
                 isActive
@@ -54,4 +58,6 @@ export default function MobileNav({ role = 'admin', onOpenMenu }) {
       </button>
     </nav>
   )
-}
+})
+
+export default MobileNav

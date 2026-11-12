@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, lazy, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ClipboardList,
@@ -22,111 +22,154 @@ import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
 import { submissionsService } from '../../services/submissions.service'
 import { calculateCompletionRate, isOverdue, formatDisplayDate, formatDeadlineBadge } from '../../utils/calculations'
+import { getCached, fetchWithCache, invalidateCacheKey } from '../../utils/dataCache'
 import Card from '../../components/common/Card'
 import StatCard from '../../components/common/StatCard'
 import Button from '../../components/common/Button'
 import Badge from '../../components/common/Badge'
-import JoinClassModal from '../../components/class/JoinClassModal'
 import NotificationBadge from '../../components/common/NotificationBadge'
 import { useNotifications } from '../../context/NotificationContext'
+
+const JoinClassModal = lazy(() => import('../../components/class/JoinClassModal'))
 
 export default function StudentDashboard() {
   const { user } = useAuth()
   const { classUnreadCounts = {} } = useNotifications()
   const navigate = useNavigate()
 
-  const [classes, setClasses] = useState([])
-  const [assignments, setAssignments] = useState([])
-  const [submissions, setSubmissions] = useState([])
-  const [groupSubmissions, setGroupSubmissions] = useState([])
-  const [loading, setLoading] = useState(true)
+  const cacheKey = user?.id ? `studentDashboard:${user.id}` : null
+  const initialSnapshot = cacheKey ? getCached(cacheKey, { allowStale: true }) : null
+
+  const [classes, setClasses] = useState(() => initialSnapshot?.classes || [])
+  const [assignments, setAssignments] = useState(() => initialSnapshot?.assignments || [])
+  const [submissions, setSubmissions] = useState(() => initialSnapshot?.submissions || [])
+  const [groupSubmissions, setGroupSubmissions] = useState(() => initialSnapshot?.groupSubmissions || [])
+  const [loading, setLoading] = useState(() => !initialSnapshot)
   const [isJoinModalOpen, setIsJoinModalOpen] = useState(false)
 
-  useEffect(() => {
-    loadStudentData()
-  }, [user?.id])
-
-  async function loadStudentData() {
+  const loadStudentData = useCallback(async ({ force = false, silent = false } = {}) => {
     if (!user?.id) return
+    const key = `studentDashboard:${user.id}`
+    const cachedFresh = !force ? getCached(key) : null
+    if (cachedFresh) {
+      setClasses(cachedFresh.classes)
+      setSubmissions(cachedFresh.submissions)
+      setGroupSubmissions(cachedFresh.groupSubmissions)
+      setAssignments(cachedFresh.assignments)
+      setLoading(false)
+      return
+    }
+
     try {
-      setLoading(true)
+      if (!silent) setLoading(true)
 
-      // 1. Fetch class memberships, selective assignments, submissions, and student group memberships in parallel
-      const [membersResult, specificResult, subsResult, groupMembershipsResult] = await Promise.all([
-        supabase
-          .from('class_members')
-          .select(`
-            class_id,
-            classes (id, name, subject, admin_id)
-          `)
-          .eq('student_id', user.id),
-        supabase
-          .from('assignment_students')
-          .select(`
-            assignment_id,
-            assignments (
-              *,
-              classes (id, name, subject)
-            )
-          `)
-          .eq('student_id', user.id),
-        submissionsService.getStudentSubmissions(user.id),
-        supabase
-          .from('group_members')
-          .select('group_id')
-          .eq('student_id', user.id),
-      ])
+      const payload = await fetchWithCache(
+        key,
+        async () => {
+          // 1. Fetch class memberships, selective assignments, submissions, and student group memberships in parallel
+          const [membersResult, specificResult, subsResult, groupMembershipsResult] = await Promise.all([
+            supabase
+              .from('class_members')
+              .select(`
+                class_id,
+                classes (id, name, subject, admin_id)
+              `)
+              .eq('student_id', user.id),
+            supabase
+              .from('assignment_students')
+              .select(`
+                assignment_id,
+                assignments (
+                  *,
+                  classes (id, name, subject)
+                )
+              `)
+              .eq('student_id', user.id),
+            submissionsService.getStudentSubmissions(user.id),
+            supabase
+              .from('group_members')
+              .select('group_id')
+              .eq('student_id', user.id),
+          ])
 
-      const studentClasses = membersResult.data?.map((m) => m.classes).filter(Boolean) || []
-      setClasses(studentClasses)
-      setSubmissions(subsResult || [])
+          const studentClasses = membersResult.data?.map((m) => m.classes).filter(Boolean) || []
+          const myGroupIds = (groupMembershipsResult.data || []).map((gm) => gm.group_id).filter(Boolean)
+          const classIds = studentClasses.map((c) => c.id)
 
-      // 2. Fetch group submissions for any active groups the student belongs to
-      const myGroupIds = (groupMembershipsResult.data || []).map((gm) => gm.group_id).filter(Boolean)
-      if (myGroupIds.length > 0) {
-        const { data: gSubs } = await supabase
-          .from('group_submissions')
-          .select('*')
-          .in('group_id', myGroupIds)
-        setGroupSubmissions(gSubs || [])
-      } else {
-        setGroupSubmissions([])
-      }
+          // 2. Fetch group submissions and class-wide published assignments concurrently
+          const [gSubsRes, classAssignmentsRes] = await Promise.all([
+            myGroupIds.length > 0
+              ? supabase.from('group_submissions').select('*').in('group_id', myGroupIds)
+              : Promise.resolve({ data: [] }),
+            classIds.length > 0
+              ? supabase
+                  .from('assignments')
+                  .select(`
+                    *,
+                    classes (id, name, subject)
+                  `)
+                  .in('class_id', classIds)
+                  .eq('assign_to_all', true)
+                  .eq('status', 'published')
+              : Promise.resolve({ data: [] }),
+          ])
 
-      const classIds = studentClasses.map((c) => c.id)
+          const allAssigned = classAssignmentsRes.data || []
+          const selectiveList = (specificResult.data || [])
+            .map((s) => s.assignments)
+            .filter((a) => a && classIds.includes(a.class_id) && a.status === 'published')
 
-      // 3. Fetch assignments assigned to all in student's enrolled classes
-      let allAssigned = []
-      if (classIds.length > 0) {
-        const { data: classAssignments } = await supabase
-          .from('assignments')
-          .select(`
-            *,
-            classes (id, name, subject)
-          `)
-          .in('class_id', classIds)
-          .eq('assign_to_all', true)
-          .eq('status', 'published')
+          // Combine and deduplicate
+          const eligibleMap = new Map()
+          allAssigned.forEach((a) => eligibleMap.set(a.id, a))
+          selectiveList.forEach((a) => eligibleMap.set(a.id, a))
 
-        allAssigned = classAssignments || []
-      }
+          return {
+            classes: studentClasses,
+            submissions: subsResult || [],
+            groupSubmissions: gSubsRes.data || [],
+            assignments: Array.from(eligibleMap.values()),
+          }
+        },
+        { ttlMs: 30000, force }
+      )
 
-      const selectiveList = (specificResult.data || [])
-        .map((s) => s.assignments)
-        .filter((a) => a && classIds.includes(a.class_id) && a.status === 'published')
-
-      // Combine and deduplicate
-      const eligibleMap = new Map()
-      allAssigned.forEach((a) => eligibleMap.set(a.id, a))
-      selectiveList.forEach((a) => eligibleMap.set(a.id, a))
-      const combined = Array.from(eligibleMap.values())
-      setAssignments(combined)
+      setClasses(payload.classes)
+      setSubmissions(payload.submissions)
+      setGroupSubmissions(payload.groupSubmissions)
+      setAssignments(payload.assignments)
     } catch (err) {
       console.error('[StudentDashboard] Error loading student dashboard:', err)
     } finally {
       setLoading(false)
     }
-  }
+  }, [user?.id])
+
+  useEffect(() => {
+    if (!user?.id) return
+    const key = `studentDashboard:${user.id}`
+    const stale = getCached(key, { allowStale: true })
+    if (stale) {
+      setClasses(stale.classes)
+      setSubmissions(stale.submissions)
+      setGroupSubmissions(stale.groupSubmissions)
+      setAssignments(stale.assignments)
+      setLoading(false)
+      if (!getCached(key)) {
+        loadStudentData({ force: true, silent: true })
+      }
+    } else {
+      loadStudentData()
+    }
+  }, [user?.id, loadStudentData])
+
+  const handleCloseJoinModal = useCallback(() => setIsJoinModalOpen(false), [])
+  const handleEnrolled = useCallback(() => {
+    if (user?.id) {
+      invalidateCacheKey(`studentDashboard:${user.id}`)
+    }
+    loadStudentData({ force: true })
+  }, [user?.id, loadStudentData])
 
   // Create submission status map: assignmentId -> submission object (individual + group)
   const submissionMap = useMemo(() => {
@@ -569,11 +612,15 @@ export default function StudentDashboard() {
       </div>
 
       {/* Modal: Join Class */}
-      <JoinClassModal
-        isOpen={isJoinModalOpen}
-        onClose={() => setIsJoinModalOpen(false)}
-        onEnrolled={() => loadStudentData()}
-      />
+      {isJoinModalOpen && (
+        <Suspense fallback={null}>
+          <JoinClassModal
+            isOpen={isJoinModalOpen}
+            onClose={handleCloseJoinModal}
+            onEnrolled={handleEnrolled}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }

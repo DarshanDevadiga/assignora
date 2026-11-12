@@ -1,32 +1,33 @@
-import React, { Suspense, lazy } from 'react'
+import React, { Suspense, lazy, useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import DashboardLayout from '../components/layout/DashboardLayout'
 import ProtectedRoute from './ProtectedRoute'
 import RoleRoute from './RoleRoute'
+import { routeLoaders, prefetchRoleCoreRoutes } from '../utils/routePrefetch'
 
-// Lazy load pages for fast initial page load and code splitting
-const Login = lazy(() => import('../pages/Login'))
-const Register = lazy(() => import('../pages/Register'))
-const AdminDashboard = lazy(() => import('../pages/admin/AdminDashboard'))
-const ClassesManagement = lazy(() => import('../pages/admin/ClassesManagement'))
-const StudentsManagement = lazy(() => import('../pages/admin/StudentsManagement'))
-const AssignmentsList = lazy(() => import('../pages/admin/AssignmentsList'))
-const CreateAssignment = lazy(() => import('../pages/admin/CreateAssignment'))
-const SubmissionTracking = lazy(() => import('../pages/admin/SubmissionTracking'))
-const GradesGradebook = lazy(() => import('../pages/admin/GradesGradebook'))
-const AnnouncementsManagement = lazy(() => import('../pages/admin/AnnouncementsManagement'))
-const StudentDashboard = lazy(() => import('../pages/student/StudentDashboard'))
-const AssignmentDetails = lazy(() => import('../pages/student/AssignmentDetails'))
-const StudentSubmissions = lazy(() => import('../pages/student/StudentSubmissions'))
-const StudentAnnouncements = lazy(() => import('../pages/student/StudentAnnouncements'))
-const ClassDetailPage = lazy(() => import('../pages/shared/ClassDetailPage'))
-const GroupDetailsPage = lazy(() => import('../pages/shared/GroupDetailsPage'))
-const SettingsPage = lazy(() => import('../pages/shared/SettingsPage'))
-const ProfilePage = lazy(() => import('../pages/shared/ProfilePage'))
-const JoinClassPage = lazy(() => import('../pages/shared/JoinClassPage'))
-const LandingPage = lazy(() => import('../pages/LandingPage'))
+// Lazy load layout & pages for fast initial page load and route-level code splitting
+const DashboardLayout = lazy(routeLoaders.DashboardLayout)
+const Login = lazy(routeLoaders.Login)
+const Register = lazy(routeLoaders.Register)
+const AdminDashboard = lazy(routeLoaders.AdminDashboard)
+const ClassesManagement = lazy(routeLoaders.ClassesManagement)
+const StudentsManagement = lazy(routeLoaders.StudentsManagement)
+const AssignmentsList = lazy(routeLoaders.AssignmentsList)
+const CreateAssignment = lazy(routeLoaders.CreateAssignment)
+const SubmissionTracking = lazy(routeLoaders.SubmissionTracking)
+const GradesGradebook = lazy(routeLoaders.GradesGradebook)
+const AnnouncementsManagement = lazy(routeLoaders.AnnouncementsManagement)
+const StudentDashboard = lazy(routeLoaders.StudentDashboard)
+const AssignmentDetails = lazy(routeLoaders.AssignmentDetails)
+const StudentSubmissions = lazy(routeLoaders.StudentSubmissions)
+const StudentAnnouncements = lazy(routeLoaders.StudentAnnouncements)
+const ClassDetailPage = lazy(routeLoaders.ClassDetailPage)
+const GroupDetailsPage = lazy(routeLoaders.GroupDetailsPage)
+const SettingsPage = lazy(routeLoaders.SettingsPage)
+const ProfilePage = lazy(routeLoaders.ProfilePage)
+const JoinClassPage = lazy(routeLoaders.JoinClassPage)
+const LandingPage = lazy(routeLoaders.LandingPage)
 const AuthCallback = lazy(() => import('../pages/AuthCallback'))
-const NotFound = lazy(() => import('../pages/shared/NotFound'))
+const NotFound = lazy(routeLoaders.NotFound)
 
 // Lightweight shimmer skeleton fallback while chunk loads
 function PageSkeleton() {
@@ -44,6 +45,12 @@ function PageSkeleton() {
 }
 
 export default function AppRoutes({ user, loading, onLogout }) {
+  useEffect(() => {
+    if (user?.role) {
+      prefetchRoleCoreRoutes(user.role)
+    }
+  }, [user?.role])
+
   return (
     <Suspense fallback={<PageSkeleton />}>
       <Routes>

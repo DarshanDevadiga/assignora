@@ -1,25 +1,34 @@
-import React, { useState } from 'react'
+import React, { useState, useCallback, Suspense, lazy } from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import Header from './Header'
 import MobileNav from './MobileNav'
-import NotificationsDrawer from '../common/NotificationsDrawer'
 import ErrorBoundary from '../common/ErrorBoundary'
 import { useNotifications } from '../../context/NotificationContext'
+
+const NotificationsDrawer = lazy(() => import('../common/NotificationsDrawer'))
 
 export default function DashboardLayout({ user, role = 'admin', onLogout }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [hasOpenedNotifications, setHasOpenedNotifications] = useState(false)
   const navigate = useNavigate()
 
   const {
     notifications,
     unreadNotificationsCount,
     totalClassUnreadCount,
-    markNotificationAsRead,
-    markAllNotificationsAsRead,
     refreshNotifications,
   } = useNotifications()
+
+  const handleOpenMobileSidebar = useCallback(() => setSidebarOpen(true), [])
+  const handleCloseMobileSidebar = useCallback(() => setSidebarOpen(false), [])
+  const handleOpenNotifications = useCallback(() => {
+    setHasOpenedNotifications(true)
+    setNotificationsOpen(true)
+  }, [])
+  const handleCloseNotifications = useCallback(() => setNotificationsOpen(false), [])
+  const handleSwitchAccount = useCallback(() => navigate('/login'), [navigate])
 
   return (
     <div className="min-h-screen w-full bg-brand-bg flex overflow-x-clip">
@@ -27,7 +36,7 @@ export default function DashboardLayout({ user, role = 'admin', onLogout }) {
       <Sidebar
         role={role}
         isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
+        onClose={handleCloseMobileSidebar}
         unreadClassesCount={totalClassUnreadCount}
         unreadNotificationsCount={unreadNotificationsCount}
       />
@@ -39,10 +48,10 @@ export default function DashboardLayout({ user, role = 'admin', onLogout }) {
           user={user}
           role={role}
           unreadNotifications={unreadNotificationsCount}
-          onOpenMobileSidebar={() => setSidebarOpen(true)}
-          onOpenNotifications={() => setNotificationsOpen(true)}
+          onOpenMobileSidebar={handleOpenMobileSidebar}
+          onOpenNotifications={handleOpenNotifications}
           onLogout={onLogout}
-          onSwitchAccount={() => navigate('/login')}
+          onSwitchAccount={handleSwitchAccount}
         />
 
         {/* Page Content */}
@@ -57,18 +66,22 @@ export default function DashboardLayout({ user, role = 'admin', onLogout }) {
         {/* Mobile Bottom Navigation */}
         <MobileNav
           role={role}
-          onOpenMenu={() => setSidebarOpen(true)}
+          onOpenMenu={handleOpenMobileSidebar}
           unreadNotifications={unreadNotificationsCount}
         />
 
-        {/* Real-time Notifications Drawer */}
-        <NotificationsDrawer
-          isOpen={notificationsOpen}
-          onClose={() => setNotificationsOpen(false)}
-          notifications={notifications}
-          userId={user?.id}
-          onRefresh={refreshNotifications}
-        />
+        {/* Real-time Notifications Drawer (lazy loaded when first opened) */}
+        {hasOpenedNotifications && (
+          <Suspense fallback={null}>
+            <NotificationsDrawer
+              isOpen={notificationsOpen}
+              onClose={handleCloseNotifications}
+              notifications={notifications}
+              userId={user?.id}
+              onRefresh={refreshNotifications}
+            />
+          </Suspense>
+        )}
       </div>
     </div>
   )

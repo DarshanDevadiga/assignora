@@ -1,8 +1,28 @@
 import { supabase } from '../lib/supabase.js'
+import { subscribeCacheClear, invalidateCachePrefix } from '../utils/dataCache.js'
 
-// High-Performance In-Memory Cache for Group Operations
+// High-Performance In-Memory Cache & In-Flight Deduplication for Group Operations
 const groupCache = new Map()
+const inFlightGroupRequests = new Map()
 const DEFAULT_TTL_MS = 60000 // 60 seconds
+
+subscribeCacheClear(() => {
+  groupCache.clear()
+  inFlightGroupRequests.clear()
+})
+
+function dedupeGroupRequest(key, fn) {
+  if (inFlightGroupRequests.has(key)) {
+    return inFlightGroupRequests.get(key)
+  }
+  const p = Promise.resolve()
+    .then(fn)
+    .finally(() => {
+      inFlightGroupRequests.delete(key)
+    })
+  inFlightGroupRequests.set(key, p)
+  return p
+}
 
 function getCached(key) {
   const item = groupCache.get(key)
@@ -24,9 +44,12 @@ function setCached(key, data, ttlMs = DEFAULT_TTL_MS) {
 /**
  * Invalidate cached group entries on mutation
  */
-export function invalidateGroupCache({ classId, groupId, studentId } = {}) {
+export function invalidateGroupCache({ classId, groupId, studentId, assignmentId } = {}) {
   if (groupId) {
     groupCache.delete(`group:${groupId}`)
+  }
+  if (assignmentId) {
+    groupCache.delete(`groupSubmissions:${assignmentId}`)
   }
   if (classId) {
     groupCache.delete(`courseGroups:${classId}`)
@@ -38,10 +61,10 @@ export function invalidateGroupCache({ classId, groupId, studentId } = {}) {
   if (classId && studentId) {
     groupCache.delete(`studentGroup:${classId}:${studentId}`)
   }
-  // If called without specific args, clear group cache
-  if (!groupId && !classId && !studentId) {
+  if (!groupId && !classId && !studentId && !assignmentId) {
     groupCache.clear()
   }
+  invalidateCachePrefix('classRoster:', 'studentDashboard:', 'assignmentDetail:', 'adminAssignments:')
 }
 
 /**
@@ -162,118 +185,120 @@ export const groupsService = {
     const cached = getCached(cacheKey)
     if (cached !== null) return cached
 
-    // 1. Query group_members for the student in this class
-    const { data: memberRows, error: memErr } = await supabase
-      .from('group_members')
-      .select('id, group_id, class_id, student_id, joined_at')
-      .eq('class_id', classId)
-      .eq('student_id', studentId)
+    return dedupeGroupRequest(cacheKey, async () => {
+      // 1. Query group_members joined with groups in a single round-trip
+      const { data: memberRows, error: memErr } = await supabase
+        .from('group_members')
+        .select(`
+          id,
+          group_id,
+          class_id,
+          student_id,
+          joined_at,
+          groups (id, class_id, name, leader_id, status, created_at)
+        `)
+        .eq('class_id', classId)
+        .eq('student_id', studentId)
 
-    if (memErr) {
-      console.error('[groupsService] getStudentGroupInCourse member query error:', memErr)
-      throw new Error(memErr.message || 'Failed to verify group membership.')
-    }
+      if (memErr) {
+        console.error('[groupsService] getStudentGroupInCourse member query error:', memErr)
+        throw new Error(memErr.message || 'Failed to verify group membership.')
+      }
 
-    if (!memberRows || memberRows.length === 0 || !memberRows[0]?.group_id) {
-      setCached(cacheKey, null, DEFAULT_TTL_MS)
-      return null
-    }
+      if (!memberRows || memberRows.length === 0 || !memberRows[0]?.group_id) {
+        setCached(cacheKey, null, DEFAULT_TTL_MS)
+        return null
+      }
 
-    const memberRow = memberRows[0]
+      const memberRow = memberRows[0]
+      let groupRow = memberRow.groups || null
 
-    // 2. Fetch the group record using the foreign key
-    const { data: groupRow, error: grpErr } = await supabase
-      .from('groups')
-      .select('id, class_id, name, leader_id, status, created_at')
-      .eq('id', memberRow.group_id)
-      .maybeSingle()
+      // Defensive fallback if join relation was not hydrated
+      if (!groupRow) {
+        const { data: fetchedGroup, error: grpErr } = await supabase
+          .from('groups')
+          .select('id, class_id, name, leader_id, status, created_at')
+          .eq('id', memberRow.group_id)
+          .maybeSingle()
 
-    if (grpErr) {
-      console.error('[groupsService] getStudentGroupInCourse group query error:', grpErr)
-      throw new Error(grpErr.message || 'Failed to load group details.')
-    }
+        if (grpErr) {
+          console.error('[groupsService] getStudentGroupInCourse group query error:', grpErr)
+          throw new Error(grpErr.message || 'Failed to load group details.')
+        }
+        groupRow = fetchedGroup
+      }
 
-    if (!groupRow) {
-      setCached(cacheKey, null, DEFAULT_TTL_MS)
-      return null
-    }
+      if (!groupRow || groupRow.class_id !== classId) {
+        setCached(cacheKey, null, DEFAULT_TTL_MS)
+        return null
+      }
 
-    // 3. Verify that the group belongs to the requested class
-    if (groupRow.class_id !== classId) {
-      console.warn('[groupsService] Group class_id mismatch:', {
-        groupClassId: groupRow.class_id,
-        requestedClassId: classId,
+      // 2. Fetch all members of this group with user profiles
+      const { data: allMembers, error: allMemErr } = await supabase
+        .from('group_members')
+        .select(`
+          id,
+          group_id,
+          class_id,
+          student_id,
+          joined_at,
+          users:student_id (id, name, email, avatar, student_id, role)
+        `)
+        .eq('group_id', groupRow.id)
+
+      if (allMemErr) {
+        console.warn('[groupsService] getStudentGroupInCourse allMembers warning:', allMemErr)
+      }
+
+      let leaderUser = null
+      const matchedMemberLeader = (allMembers || []).find((m) => m.student_id === groupRow.leader_id && m.users)
+      if (matchedMemberLeader) {
+        leaderUser = matchedMemberLeader.users
+      } else if (groupRow.leader_id) {
+        const { data: leaderData, error: leaderErr } = await supabase
+          .from('users')
+          .select('id, name, email, avatar, student_id, role')
+          .eq('id', groupRow.leader_id)
+          .maybeSingle()
+        if (!leaderErr && leaderData) {
+          leaderUser = leaderData
+        }
+      }
+
+      const formattedMembers = (allMembers || []).map((m) => {
+        const u = m.users || {}
+        return {
+          id: m.id,
+          group_id: m.group_id,
+          class_id: m.class_id,
+          student_id: m.student_id,
+          joined_at: m.joined_at,
+          user: {
+            id: u.id || m.student_id,
+            name: u.name || 'Student',
+            email: u.email || '',
+            avatar: u.avatar || null,
+            student_id: u.student_id || m.student_id,
+            role: u.role || 'student',
+          },
+        }
       })
-      setCached(cacheKey, null, DEFAULT_TTL_MS)
-      return null
-    }
 
-    // 4. Fetch all members of this group with full user profiles
-    const { data: allMembers, error: allMemErr } = await supabase
-      .from('group_members')
-      .select(`
-        id,
-        group_id,
-        class_id,
-        student_id,
-        joined_at,
-        users:student_id (id, name, email, avatar, student_id, role)
-      `)
-      .eq('group_id', groupRow.id)
-
-    if (allMemErr) {
-      console.warn('[groupsService] getStudentGroupInCourse allMembers warning:', allMemErr)
-    }
-
-    // 5. Fetch leader profile (check members first before extra roundtrip)
-    let leaderUser = null
-    const matchedMemberLeader = (allMembers || []).find((m) => m.student_id === groupRow.leader_id && m.users)
-    if (matchedMemberLeader) {
-      leaderUser = matchedMemberLeader.users
-    } else if (groupRow.leader_id) {
-      const { data: leaderData, error: leaderErr } = await supabase
-        .from('users')
-        .select('id, name, email, avatar, student_id, role')
-        .eq('id', groupRow.leader_id)
-        .maybeSingle()
-      if (!leaderErr && leaderData) {
-        leaderUser = leaderData
+      const finalGroup = {
+        id: groupRow.id,
+        class_id: groupRow.class_id,
+        name: groupRow.name,
+        leader_id: groupRow.leader_id,
+        status: groupRow.status,
+        created_at: groupRow.created_at,
+        leader: leaderUser || { id: groupRow.leader_id, name: 'Group Leader' },
+        members: formattedMembers,
+        currentUserMembership: memberRow,
       }
-    }
 
-    const formattedMembers = (allMembers || []).map((m) => {
-      const u = m.users || {}
-      return {
-        id: m.id,
-        group_id: m.group_id,
-        class_id: m.class_id,
-        student_id: m.student_id,
-        joined_at: m.joined_at,
-        user: {
-          id: u.id || m.student_id,
-          name: u.name || 'Student',
-          email: u.email || '',
-          avatar: u.avatar || null,
-          student_id: u.student_id || m.student_id,
-          role: u.role || 'student',
-        },
-      }
+      setCached(cacheKey, finalGroup, DEFAULT_TTL_MS)
+      return finalGroup
     })
-
-    const finalGroup = {
-      id: groupRow.id,
-      class_id: groupRow.class_id,
-      name: groupRow.name,
-      leader_id: groupRow.leader_id,
-      status: groupRow.status,
-      created_at: groupRow.created_at,
-      leader: leaderUser || { id: groupRow.leader_id, name: 'Group Leader' },
-      members: formattedMembers,
-      currentUserMembership: memberRow,
-    }
-
-    setCached(cacheKey, finalGroup, DEFAULT_TTL_MS)
-    return finalGroup
   },
 
   /**
@@ -417,6 +442,7 @@ export const groupsService = {
     }
 
     invalidateGroupCache({ groupId })
+    groupCache.clear()
     return data
   },
 
@@ -439,6 +465,7 @@ export const groupsService = {
     }
 
     invalidateGroupCache({ groupId })
+    groupCache.clear()
     return data
   },
 
@@ -462,6 +489,7 @@ export const groupsService = {
     }
 
     invalidateGroupCache({ groupId })
+    groupCache.clear()
     return data
   },
 
@@ -484,6 +512,7 @@ export const groupsService = {
     }
 
     invalidateGroupCache({ groupId })
+    groupCache.clear()
     return data
   },
 
@@ -510,7 +539,7 @@ export const groupsService = {
       throw new Error(data.error || 'Acknowledgement rejected by database.')
     }
 
-    invalidateGroupCache({ groupId })
+    invalidateGroupCache({ groupId, assignmentId })
     return data
   },
 
@@ -546,28 +575,38 @@ export const groupsService = {
   /**
    * Fetch all group submissions for a specific assignment (for professor tracking)
    */
-  async getAllGroupSubmissionsForAssignment(assignmentId) {
+  async getAllGroupSubmissionsForAssignment(assignmentId, forceRefresh = false) {
     if (!assignmentId) return []
 
-    try {
-      const { data, error } = await supabase
-        .from('group_submissions')
-        .select(`
-          *,
-          leader:acknowledged_by (id, name, email, avatar)
-        `)
-        .eq('assignment_id', assignmentId)
+    const cacheKey = `groupSubmissions:${assignmentId}`
+    if (!forceRefresh) {
+      const cached = getCached(cacheKey)
+      if (cached) return cached
+    }
 
-      if (error) {
-        console.error('[groupsService] getAllGroupSubmissionsForAssignment error:', error.message)
+    return dedupeGroupRequest(cacheKey, async () => {
+      try {
+        const { data, error } = await supabase
+          .from('group_submissions')
+          .select(`
+            *,
+            leader:acknowledged_by (id, name, email, avatar)
+          `)
+          .eq('assignment_id', assignmentId)
+
+        if (error) {
+          console.error('[groupsService] getAllGroupSubmissionsForAssignment error:', error.message)
+          return []
+        }
+
+        const result = data || []
+        setCached(cacheKey, result, 30000)
+        return result
+      } catch (err) {
+        console.error('[groupsService] getAllGroupSubmissionsForAssignment exception:', err)
         return []
       }
-
-      return data || []
-    } catch (err) {
-      console.error('[groupsService] getAllGroupSubmissionsForAssignment exception:', err)
-      return []
-    }
+    })
   },
 
   /**
@@ -820,6 +859,8 @@ export const groupsService = {
       throw new Error(data.error || 'Grading failed.')
     }
 
+    invalidateGroupCache({ groupId: data?.group_id, assignmentId: data?.assignment_id })
+    groupCache.clear()
     return data
   },
 
@@ -895,6 +936,7 @@ export const groupsService = {
     }
 
     invalidateGroupCache({ groupId })
+    groupCache.clear()
     return data
   },
 
@@ -910,22 +952,26 @@ export const groupsService = {
     if (cached) return cached
 
     try {
-      const { data: members, error: memErr } = await supabase
-        .from('class_members')
-        .select(`
-          id,
-          student_id,
-          joined_at,
-          users:student_id (id, name, email, avatar, student_id, role)
-        `)
-        .eq('class_id', classId)
+      const [memRes, groups] = await Promise.all([
+        supabase
+          .from('class_members')
+          .select(`
+            id,
+            student_id,
+            joined_at,
+            users:student_id (id, name, email, avatar, student_id, role)
+          `)
+          .eq('class_id', classId),
+        this.getCourseGroups(classId),
+      ])
+
+      const { data: members, error: memErr } = memRes
 
       if (memErr) {
         console.error('[groupsService] getClassStudentsGroupStatus error:', memErr)
         return []
       }
 
-      const groups = await this.getCourseGroups(classId)
       const studentGroupMap = {}
 
       groups.forEach((g) => {

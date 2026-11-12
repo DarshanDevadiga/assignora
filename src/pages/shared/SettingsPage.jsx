@@ -288,7 +288,7 @@ export default function SettingsPage() {
                       avatar === url ? 'border-brand-primary ring-2 ring-brand-primary/30 scale-105' : 'border-slate-200 hover:border-brand-border'
                     }`}
                   >
-                    <img src={url} alt={`Preset ${i}`} className="w-full h-full object-cover" />
+                    <img src={url} alt={`Preset ${i}`} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                   </button>
                 ))}
               </div>

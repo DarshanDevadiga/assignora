@@ -5,7 +5,7 @@
 **Target Database:** `trkcagoxopabqerljgvn` (PostgreSQL 17.11 on Supabase ap-southeast-1)  
 **Production URL:** https://assignora-cyan.vercel.app/  
 **Repository:** https://github.com/DarshanDevadiga/assignora  
-**Last Updated:** 2026-11-12T10:07:30+05:30  
+**Last Updated:** 2026-11-12T10:46:00+05:30  
 
 ---
 
@@ -13,6 +13,7 @@
 
 | Phase / Objective | Status | Notes |
 | :--- | :--- | :--- |
+| **Optional Faculty Invitation Token (Frontend & Live DB Migration)** | **PASS (LIVE APPLIED & VERIFIED)** | Updated `Register.jsx` & `auth.service.js` so Faculty Invitation Token is optional (`validate_faculty_invitation` accepts empty tokens, rejects invalid/expired tokens before `auth.signUp()`). Live DB migration `round2_optional_faculty_invitation_token` applied & verified (`trkcagoxopabqerljgvn`) across `validate_faculty_invitation`, `handle_new_user`, and `register_user_profile` with `pg_catalog, pg_temp` search_path and unchanged `users` RLS |
 | **Safe Management Actions (Classes, Groups, Assignments)** | **PASS** | Added 3-dot `ActionMenu`, `EditClassModal`, `EditGroupModal`, `ConfirmDeleteModal`, `ToastProvider`, impact summaries, archival workflows, student delete prevention, and submission-locked assignment editing across Admin/Professor/Student interfaces |
 | **Staged Management SQL Migration Package** | **PASS (LIVE APPLIED & VERIFIED)** | Executed by owner on `trkcagoxopabqerljgvn` and verified read-only via `supabase_mcp`: 4 `classes` columns + `classes_status_check`, 7 `SECURITY DEFINER` (`pg_catalog, pg_temp`) functions, 2 `BEFORE DELETE` preservation triggers, student group-delete blocking active, and all existing data preserved (`classes: 11, assignments: 29, groups: 6, submissions: 39, group_submissions: 6`) |
 | :--- | :--- | :--- |
@@ -57,6 +58,11 @@
 ---
 
 ## 2. Concrete Work Completed
+
+-1. **Optional Faculty Invitation Token (`2026-11-12`, LIVE APPLIED & VERIFIED)**:
+   - **Frontend Form & Auth Service**: Updated [Register.jsx](file:///c:/Project/assignora/src/pages/Register.jsx) (`Faculty Invitation Token (Optional)` label, non-required input, helper text `"If you have an invitation token from your department administrator, enter it here. Otherwise, you can leave this field empty."`, targeted token error handling) and [auth.service.js](file:///c:/Project/assignora/src/services/auth.service.js) (only validates non-empty tokens pre-signup; never creates partial auth accounts on invalid/expired tokens).
+   - **SQL Migration Package (LIVE APPLIED & VERIFIED)**: Applied `round2_optional_faculty_invitation_token` ([20261112000001_round2_optional_faculty_invitation_token.sql](file:///c:/Project/assignora/supabase/migrations/20261112000001_round2_optional_faculty_invitation_token.sql)) on `trkcagoxopabqerljgvn` via `supabase_mcp` `apply_migration`, verified via read-only `execute_sql` (`validate_faculty_invitation`, `handle_new_user`, `register_user_profile` with `prosecdef: true`, `search_path=pg_catalog, pg_temp`, trigger `on_auth_user_created`, `users_insert_policy` / `users_update_policy`, and untouched `admin: 2, student: 6` counts). Rollback available at [rollback_round2_optional_faculty_invitation_token.sql](file:///c:/Project/assignora/supabase/migrations/rollback_round2_optional_faculty_invitation_token.sql).
+   - **Verification**: Created [verify-faculty-optional-token.js](file:///c:/Project/assignora/scripts/verify-faculty-optional-token.js) and updated [verify-registration-profiles-and-enrollment-rls.js](file:///c:/Project/assignora/scripts/verify-registration-profiles-and-enrollment-rls.js).
 
 0. **Safe Admin/Professor Management Actions (`2026-11-12`)**:
    - **Shared Infrastructure**: Created [ToastContext.jsx](file:///c:/Project/assignora/src/context/ToastContext.jsx) (mounted in [App.jsx](file:///c:/Project/assignora/src/App.jsx)), [ActionMenu.jsx](file:///c:/Project/assignora/src/components/common/ActionMenu.jsx), [ConfirmDeleteModal.jsx](file:///c:/Project/assignora/src/components/common/ConfirmDeleteModal.jsx), [EditClassModal.jsx](file:///c:/Project/assignora/src/components/class/EditClassModal.jsx), and [EditGroupModal.jsx](file:///c:/Project/assignora/src/components/group/EditGroupModal.jsx).

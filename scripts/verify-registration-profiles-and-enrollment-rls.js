@@ -40,9 +40,14 @@ test('Static & Security Audits — Auth, Profiles & Class Enrollment', async (t)
     assert.ok(!authCallbackSrc.includes('user_metadata?.role'), 'AuthCallback must not trust client metadata for role redirection')
   })
 
-  await t.test('1.4 Register.jsx enforces Faculty Invitation Token for Professor accounts', () => {
-    assert.ok(!registerSrc.includes('(Optional in Demo)'), 'Register.jsx must not claim faculty token is optional in demo')
-    assert.ok(registerSrc.includes("role === 'admin' && !facultyToken.trim()"), 'Register.jsx must validate non-empty faculty token')
+  await t.test('1.4 Register.jsx treats Faculty Invitation Token as optional for Professor / Faculty accounts', () => {
+    assert.ok(registerSrc.includes('Faculty Invitation Token (Optional)'), 'Register.jsx must label token field as optional')
+    assert.ok(
+      registerSrc.includes('If you have an invitation token from your department administrator, enter it here. Otherwise, you can leave this field empty.'),
+      'Register.jsx must include clear optional helper text'
+    )
+    assert.ok(!registerSrc.includes("role === 'admin' && !facultyToken.trim()"), 'Register.jsx must not block empty faculty token submissions')
+    assert.ok(authServiceSrc.includes('if (cleanRole === \'admin\' && cleanToken)'), 'authService.signUp must only call validate_faculty_invitation when a non-empty token is supplied')
   })
 
   await t.test('1.5 classesService.findClassByCode & enrollStudent avoid 403 and enforce student verification', () => {

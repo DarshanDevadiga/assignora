@@ -56,19 +56,16 @@ export default function Register() {
       setErrorMessage('Password must be at least 6 characters long.')
       return
     }
-    if (role === 'admin' && !facultyToken.trim()) {
-      setErrorMessage('Professor registration requires a valid Faculty Invitation Token issued by academic administration.')
-      return
-    }
 
     try {
       setLoading(true)
+      const trimmedFacultyToken = facultyToken.trim()
       const res = await signUp({
         name: name.trim(),
         email: email.trim(),
         password,
         role,
-        facultyInviteToken: role === 'admin' ? facultyToken.trim() : null,
+        facultyInviteToken: role === 'admin' && trimmedFacultyToken ? trimmedFacultyToken : null,
         studentId: role === 'student' ? studentId.trim() : null,
       })
 
@@ -84,10 +81,15 @@ export default function Register() {
     } catch (err) {
       console.error('[Register] Error:', err)
       const msg = err.message || ''
-      if (msg.includes('already registered')) {
+      if (msg.toLowerCase().includes('already registered')) {
         setErrorMessage('An account with this email address already exists. Please sign in instead.')
-      } else if (msg.includes('Invalid Faculty Invitation Token') || msg.includes('token')) {
+      } else if (msg === 'Invalid Faculty Invitation Token.') {
         setErrorMessage('Invalid or expired Faculty Invitation Token. Please check with your department administrator.')
+      } else if (
+        msg.includes('Faculty Invitation Token') ||
+        msg.includes('invitation token')
+      ) {
+        setErrorMessage(msg)
       } else {
         setErrorMessage(msg || 'Registration failed. Please check your internet connection and try again.')
       }
@@ -215,24 +217,23 @@ export default function Register() {
               />
             )}
 
-            {/* Faculty Invitation Token (Only for professors) */}
+            {/* Faculty Invitation Token (Optional for professors) */}
             {role === 'admin' && (
               <div className="space-y-1">
                 <Input
-                  label="Faculty Invitation Token"
+                  label="Faculty Invitation Token (Optional)"
                   type="text"
-                  required
                   icon={KeyRound}
                   value={facultyToken}
                   onChange={(e) => {
                     setFacultyToken(e.target.value)
                     if (errorMessage) setErrorMessage('')
                   }}
-                  placeholder="Enter your FAC-... invitation token"
+                  placeholder="Enter your FAC-... invitation token (optional)"
                 />
-                <p className="text-[11px] text-brand-muted flex items-center gap-1.5 pt-0.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-brand-primary shrink-0" />
-                  <span>A valid Faculty Invitation Token issued by your department administrator is required for Professor accounts.</span>
+                <p className="text-[11px] text-brand-muted flex items-start gap-1.5 pt-0.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-brand-primary shrink-0 mt-0.5" />
+                  <span>If you have an invitation token from your department administrator, enter it here. Otherwise, you can leave this field empty.</span>
                 </p>
               </div>
             )}

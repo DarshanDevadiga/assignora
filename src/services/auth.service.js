@@ -172,29 +172,18 @@ export const authService = {
     const cleanToken = facultyInviteToken ? facultyInviteToken.trim() : ''
     const cleanStudentId = studentId ? studentId.trim() : ''
 
-    // 0. If registering as Professor/Admin, validate Faculty Invitation Token before creating Auth user
-    if (cleanRole === 'admin') {
-      if (!cleanToken) {
-        throw new Error('Professor registration requires a valid Faculty Invitation Token issued by academic administration.')
+    // 0. If registering as Professor/Faculty AND an invitation token is explicitly provided,
+    // validate it strictly before creating an Auth user so invalid/expired tokens do not create partial accounts.
+    if (cleanRole === 'admin' && cleanToken) {
+      const { data: valRes, error: valErr } = await supabase.rpc('validate_faculty_invitation', {
+        p_token: cleanToken,
+        p_email: cleanEmail,
+      })
+      if (valErr) {
+        throw new Error(valErr.message || 'Unable to validate Faculty Invitation Token right now. Please try again.')
       }
-      try {
-        const { data: valRes, error: valErr } = await supabase.rpc('validate_faculty_invitation', {
-          p_token: cleanToken,
-          p_email: cleanEmail,
-        })
-        if (!valErr && valRes && valRes.valid === false) {
-          throw new Error(valRes.error || 'Invalid Faculty Invitation Token.')
-        }
-      } catch (valEx) {
-        if (
-          valEx.message?.includes('Faculty Invitation Token') ||
-          valEx.message?.includes('invitation token') ||
-          valEx.message?.includes('redeemed') ||
-          valEx.message?.includes('expired')
-        ) {
-          throw valEx
-        }
-        // If validate_faculty_invitation RPC is not deployed yet, RPC register_user_profile / trigger will enforce it
+      if (!valRes || valRes.valid === false) {
+        throw new Error(valRes?.error || 'Invalid Faculty Invitation Token.')
       }
     }
 
